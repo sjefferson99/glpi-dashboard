@@ -38,7 +38,9 @@ STATIC = Path(__file__).parent / "static"
 # No ChangeValidation: GLPI only lets a profile see approval requests if it may also create or
 # approve them. A change's own global_validation says whether it is waiting for approval.
 ITIL = ("Ticket", "Problem", "Change", "ITILCategory", "Item_Ticket", "Item_Problem", "Change_Item",
-        "Problem_Ticket", "RecurrentChange", "Project", "ProjectState", "Itil_Project", "ImpactRelation")
+        "Problem_Ticket", "Change_Problem", "RecurrentChange", "Project", "ProjectState", "Itil_Project",
+        "ImpactRelation", "Ticket_User", "Group_Ticket", "Problem_User", "Group_Problem", "Change_User",
+        "Change_Group")
 
 # The Refresh now button re-reads GLPI at most this often; quicker clicks get the current snapshot.
 MANUAL_MIN_SECONDS = 30

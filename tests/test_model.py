@@ -28,7 +28,7 @@ def refs(snap, key):
 
 def _counts(snap):
     """Every (count, list key) pair the page shows."""
-    for t in snap["summary"] + snap["in_flight"]["tiles"]:
+    for t in snap["summary"] + snap["quality"] + [t for g in snap["in_flight"]["groups"] for t in g["tiles"]]:
         yield t["count"], t["key"]
     for a in snap["health"]["areas"]:
         yield a["incidents"], a["incidents_list"]
@@ -36,21 +36,32 @@ def _counts(snap):
     for c in snap["health"]["cis"]:
         for part in ("incidents", "problems", "changes"):
             yield c[part], c[part + "_list"]
-    for p in snap["in_flight"]["projects"]:
+    for r in snap["health"]["recurring"]:
+        yield r["open"], r["open_list"]
+    for p in snap["lists"]["projects"]["rows"]:
         yield p["open"], p["open_list"]
         yield p["total"], p["total_list"]
     yield snap["risks"]["total"], snap["risks"]["list"]
 
 
+def _length(lst):
+    return len(lst["rows"]) if "rows" in lst else len(lst["refs"])
+
+
 def test_every_count_is_the_length_of_its_list(snap):
     pairs = list(_counts(snap))
-    assert len(pairs) > 20
+    assert len(pairs) > 40
     for count, key in pairs:
-        assert count == len(refs(snap, key)), key
+        assert count == _length(snap["lists"][key]), key
+
+
+def test_table_lists_say_which_columns_to_show(snap):
+    tables = {k: lst["kind"] for k, lst in snap["lists"].items() if "rows" in lst}
+    assert tables == {"projects": "projects"}
 
 
 def test_every_listed_record_is_sent_and_nothing_else(snap):
-    used = {k for lst in snap["lists"].values() for k in lst["refs"]}
+    used = {k for lst in snap["lists"].values() for k in lst.get("refs", ())}
     assert set(snap["records"]) == used
     # Closed and cancelled records nobody lists aren't sent.
     assert "Problem:2" not in snap["records"] and "Change:5" not in snap["records"]
@@ -63,7 +74,8 @@ def test_internal_fields_are_not_sent(snap):
 
 def test_lists_have_no_duplicates(snap):
     for key, lst in snap["lists"].items():
-        assert len(lst["refs"]) == len(set(lst["refs"])), key
+        if "refs" in lst:
+            assert len(lst["refs"]) == len(set(lst["refs"])), key
 
 
 # --- summary --------------------------------------------------------------------------------------------------
@@ -71,13 +83,108 @@ def test_lists_have_no_duplicates(snap):
 def test_summary_counts(snap):
     counts = {t["key"]: t["count"] for t in snap["summary"]}
     assert counts == {"open-incidents": 3, "open-requests": 1, "open-problems": 1,
-                      "open-changes": 3, "high-priority": 2, "no-category": 2}
+                      "open-changes": 3, "high-priority": 2}
 
 
 def test_summary_lists(snap):
     assert set(refs(snap, "open-changes")) == {"Change:1", "Change:2", "Change:4"}   # not Applied C3
     assert set(refs(snap, "high-priority")) == {"Ticket:1", "Change:1"}
+
+
+# --- record quality -------------------------------------------------------------------------------------------
+
+def test_quality_counts(snap):
+    counts = {t["key"]: t["count"] for t in snap["quality"]}
+    assert counts == {"no-category": 2, "no-ci": 2, "unassigned": 4, "stale": 2,
+                      "orphan-problems": 0, "no-approval": 0, "empty-plan": 1}
+
+
+def test_every_tile_has_a_colour_kind(snap):
+    tiles = snap["summary"] + snap["quality"] + [t for g in snap["in_flight"]["groups"] for t in g["tiles"]]
+    kinds = {"incident", "request", "problem", "change", "project", "issue"}
+    assert all(t["kind"] in kinds for t in tiles)
+    by_key = {t["key"]: t["kind"] for t in tiles}
+    assert (by_key["open-incidents"], by_key["open-problems"], by_key["open-changes"]) == (
+        "incident", "problem", "change")
+    assert (by_key["requests-new"], by_key["orphan-problems"], by_key["awaiting-approval"], by_key["projects"]) == (
+        "request", "problem", "change", "project")
+    # A group's tiles share its colour.
+    for g in snap["in_flight"]["groups"]:
+        assert {t["kind"] for t in g["tiles"]} == {g["kind"]}
+
+
+def test_quality_tiles_have_a_short_label_a_title_and_the_full_rule(snap):
+    t = {t["key"]: t for t in snap["quality"]}["no-ci"]
+    assert t["label"] == "No CI"
+    assert snap["lists"]["no-ci"]["title"] == t["title"] == "Open incidents, problems and changes without a CI"
+    assert "Requests are left out" in t["detail"]
+    assert all(len(t["label"]) <= 20 and t["detail"] for t in snap["quality"])
+
+
+def test_quality_lists(snap):
     assert set(refs(snap, "no-category")) == {"Ticket:3", "Ticket:5"}
+    # Request T3 has no CI either, but requests needn't have one.
+    assert set(refs(snap, "no-ci")) == {"Ticket:5", "Change:4"}
+    # T2 has only a requester; T5 and C2 are assigned to a group.
+    assert set(refs(snap, "unassigned")) == {"Ticket:2", "Ticket:3", "Change:3", "Change:4"}
+    # Last updated 45 and 100 days ago; C3 was updated 10 days ago.
+    assert set(refs(snap, "stale")) == {"Problem:1", "Change:2"}
+    # C2's Backup plan is an empty editor, entity-encoded; standard change C4 has no plan and isn't listed.
+    assert refs(snap, "empty-plan") == ["Change:2"]
+
+
+def test_stale_falls_back_to_the_opening_date():
+    data = model_input()
+    data["Ticket"][0].update(date_mod=None)          # T1, opened 10 days ago
+    data["Ticket"][1].update(date_mod=None, date=(NOW - timedelta(days=31)).strftime("%Y-%m-%d %H:%M:%S"))
+    stale = set(refs(build(data), "stale"))
+    assert "Ticket:2" in stale and "Ticket:1" not in stale
+
+
+def test_orphan_problem_has_no_incident_and_no_change():
+    data = model_input()
+    data["Problem"] += [{**data["Problem"][0], "id": 3}, {**data["Problem"][0], "id": 4},
+                        {**data["Problem"][0], "id": 5}]
+    data["Problem_Ticket"].append({"id": 3, "problems_id": 3, "tickets_id": 3})   # linked to a request
+    data["Change_Problem"].append({"id": 2, "changes_id": 2, "problems_id": 4})   # preventive: a change only
+    assert refs(build(data), "orphan-problems") == ["Problem:5"]
+
+
+def test_no_approval_counts_only_non_standard_changes_in_new():
+    data = model_input()
+    for c in data["Change"]:
+        c["global_validation"] = 1
+    data["Change"][0]["status"] = 1                  # C1 back in New
+    # C2 (Accepted) and C3 (Applied) are past New; C4 is in New but a standard change; C5 is cancelled.
+    assert refs(build(data), "no-approval") == ["Change:1"]
+
+
+def test_no_approval_ignores_a_change_in_new_awaiting_approval():
+    data = model_input()
+    data["Change"][0]["status"] = 1                  # C1 in New, approval already requested (2)
+    assert refs(build(data), "no-approval") == []
+
+
+def test_unassigned_ignores_requesters_and_observers():
+    data = model_input()
+    data["Ticket_User"] = [{"id": 1, "tickets_id": 1, "users_id": 2, "type": 3}]
+    data["Group_Ticket"] = [{"id": 1, "tickets_id": 5, "groups_id": 1, "type": 1}]
+    assert {"Ticket:1", "Ticket:5"} <= set(refs(build(data), "unassigned"))
+
+
+@pytest.mark.parametrize("value,blank", [
+    (None, True), ("", True), ("   ", True), ("<p></p>", True), ("<p>&nbsp;</p>", True),
+    ("&lt;p&gt;&amp;nbsp;&lt;/p&gt;", True), ("&#60;p&#62;&#60;/p&#62;", True), ("<p><br></p>", True),
+    ("<p>x</p>", False), ("&lt;p&gt;Roll back&lt;/p&gt;", False), ("plain text", False), ("0", False),
+])
+def test_blank_rich_text(value, blank):
+    assert model._blank(value) is blank
+
+
+def test_quality_text_is_safe_with_markup_in_plan_fields():
+    data = model_input()
+    data["Change"][0]["impactcontent"] = '<img src=x onerror="alert(1)">'    # a tag and no text: blank
+    assert "Change:1" in refs(build(data), "empty-plan")
 
 
 def test_lists_sort_by_priority_then_age(snap):
@@ -94,6 +201,7 @@ def test_record_fields(snap):
     assert r["priority_name"] == "High"
     assert r["category"] == "Security > Certificates" and r["area"] == "Security"
     assert r["age_days"] == 10 and r["date"] == (NOW - timedelta(days=10)).date().isoformat()
+    assert r["updated"] == (NOW - timedelta(days=5)).date().isoformat()
     assert r["url"] == f"{PUBLIC_URL}/front/ticket.form.php?id=1"
     assert r["cis"] == [{"name": "web1", "url": f"{PUBLIC_URL}/front/computer.form.php?id=1", "internet": True}]
 
@@ -117,6 +225,15 @@ def test_future_or_missing_date_gives_age_zero():
     snap = build(data)
     assert snap["records"]["Ticket:1"]["age_days"] == 0
     assert snap["records"]["Ticket:2"]["age_days"] == 0
+
+
+def test_missing_last_update_gives_none():
+    data = model_input()
+    data["Ticket"][0]["date_mod"] = None
+    del data["Ticket"][1]["date_mod"]
+    snap = build(data)
+    assert snap["records"]["Ticket:1"]["updated"] is None
+    assert snap["records"]["Ticket:2"]["updated"] is None
 
 
 def test_ci_without_a_readable_name_shows_type_and_id():
@@ -221,12 +338,45 @@ def test_top_risks_are_capped_but_the_list_has_all():
 
 # --- in flight ------------------------------------------------------------------------------------------------
 
-def test_in_flight_tiles(snap):
-    tiles = {t["key"]: t["count"] for t in snap["in_flight"]["tiles"]}
-    assert tiles == {"awaiting-approval": 1, "changes-accepted": 1, "changes-testing": 0,
-                     "changes-qualification": 0, "changes-applied": 1}
+def flight(snap, group):
+    [g] = [g for g in snap["in_flight"]["groups"] if g["title"] == group]
+    return {t["key"]: t["count"] for t in g["tiles"]}
+
+
+def test_in_flight_groups(snap):
+    assert [g["title"] for g in snap["in_flight"]["groups"]] == [
+        "Incidents", "Requests", "Problems", "Changes", "Projects"]
+
+
+def test_in_flight_tickets_and_problems_by_status(snap):
+    # Incidents T1 assigned, T2 new, T5 pending (T4 closed); request T3 new; problem P1 accepted.
+    assert flight(snap, "Incidents") == {"incidents-new": 1, "incidents-approval": 0,
+                                         "incidents-processing-assigned": 1, "incidents-processing-planned": 0,
+                                         "incidents-pending": 1}
+    assert flight(snap, "Requests")["requests-new"] == 1
+    assert sum(flight(snap, "Requests").values()) == 1
+    assert flight(snap, "Problems") == {"problems-new": 0, "problems-accepted": 1,
+                                        "problems-processing-assigned": 0, "problems-processing-planned": 0,
+                                        "problems-pending": 0, "problems-under-observation": 0}
+    assert refs(snap, "incidents-pending") == ["Ticket:5"]
+
+
+def test_in_flight_tiles_have_a_short_label_and_a_full_title(snap):
+    tiles = {t["key"]: t for g in snap["in_flight"]["groups"] for t in g["tiles"]}
+    assert (tiles["incidents-pending"]["label"], tiles["incidents-pending"]["title"]) == (
+        "Pending", "Incidents: Pending")
+    assert snap["lists"]["incidents-pending"]["title"] == "Incidents: Pending"
+
+
+def test_in_flight_changes(snap):
+    assert flight(snap, "Changes") == {"awaiting-approval": 1, "changes-accepted": 1, "changes-testing": 0,
+                                       "changes-qualification": 0, "changes-applied": 1}
     assert refs(snap, "awaiting-approval") == ["Change:1"]
     assert refs(snap, "changes-applied") == ["Change:3"]
+
+
+def test_in_flight_projects_tile(snap):
+    assert flight(snap, "Projects") == {"projects": 1}
 
 
 def test_awaiting_approval_uses_global_validation_not_status():
@@ -237,7 +387,7 @@ def test_awaiting_approval_uses_global_validation_not_status():
 
 
 def test_recurring_changes(snap):
-    rec = snap["in_flight"]["recurring"]
+    rec = snap["health"]["recurring"]
     assert [(r["name"], r["next_creation"], r["due"]) for r in rec] == [
         ("Monthly patching", "2026-11-01", "2026-11-03"),   # due = next creation + create_before (2 d)
         ("Unscheduled review", None, None),                 # no date sorts last
@@ -245,8 +395,37 @@ def test_recurring_changes(snap):
     assert rec[0]["url"] == f"{PUBLIC_URL}/front/recurrentchange.form.php?id=1"
 
 
+def test_recurring_changes_count_open_changes_by_title(snap):
+    rec = {r["name"]: r for r in snap["health"]["recurring"]}
+    assert refs(snap, rec["Monthly patching"]["open_list"]) == ["Change:4"]
+    assert rec["Unscheduled review"]["open"] == 0
+
+
+def test_recurring_change_match_ignores_case_and_prefers_the_longest_name():
+    data = model_input()
+    data["RecurrentChange"].append({"id": 4, "name": "Monthly patching web", "is_active": 1})
+    data["Change"] += [
+        {**data["Change"][3], "id": 6, "name": "MONTHLY PATCHING - November"},
+        {**data["Change"][3], "id": 7, "name": "Monthly patching web - November"},
+        {**data["Change"][3], "id": 8, "name": "Monthly patching", "status": 6},        # closed
+        {**data["Change"][3], "id": 9, "name": "Retired check 1"},                      # inactive
+        {**data["Change"][3], "id": 10, "name": None},
+    ]
+    snap = build(data)
+    rec = {r["name"]: r for r in snap["health"]["recurring"]}
+    assert set(refs(snap, rec["Monthly patching"]["open_list"])) == {"Change:4", "Change:6"}
+    assert refs(snap, rec["Monthly patching web"]["open_list"]) == ["Change:7"]
+    assert "Retired check" not in rec
+
+
+def test_recurring_change_with_a_blank_name_matches_nothing():
+    data = model_input()
+    data["RecurrentChange"].append({"id": 4, "name": "  ", "is_active": 1})
+    assert [r["name"] for r in build(data)["health"]["recurring"]] == ["Monthly patching", "Unscheduled review"]
+
+
 def test_projects(snap):
-    [p] = snap["in_flight"]["projects"]
+    [p] = snap["lists"]["projects"]["rows"]
     assert (p["name"], p["code"], p["state"], p["percent_done"]) == ("Certificate automation", "PRJ1", "Processing", 40)
     assert (p["open"], p["total"]) == (2, 3)          # the link to a missing Change #99 is ignored
     assert set(refs(snap, p["total_list"])) == {"Change:1", "Problem:1", "Ticket:4"}
@@ -258,7 +437,7 @@ def test_empty_glpi():
     empty = {t: [] for t in dataset() if t not in ("Computer", "Appliance")}
     snap = build({**empty, "cis": {}})
     assert all(t["count"] == 0 for t in snap["summary"])
-    assert snap["health"] == {"areas": [], "cis": []}
+    assert snap["health"] == {"areas": [], "cis": [], "recurring": []}
     assert snap["risks"]["top"] == [] and snap["records"] == {}
 
 
