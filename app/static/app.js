@@ -629,7 +629,7 @@ async function loadExplorer() {
     explorerData = body;
     err.hidden = true;
   } catch (e) {
-    explorerAsked = null;      // asked again at the next poll
+    // explorerAsked stays set, so the redraw below doesn't ask again at once; load() clears it, so the next poll does.
     err.hidden = false;
     err.textContent = `Could not load the records for the explorer: ${e.message}${explorerData ? ' - showing the last ones read.' : ''}`;
   }
@@ -1033,6 +1033,7 @@ async function load(refresh = false) {
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
     snap = body;
+    explorerAsked = null;     // the explorer may ask again: once per poll if it failed, else only for a new refresh
     render();
     return null;
   } catch (e) {
@@ -1062,8 +1063,9 @@ function selectTab(tab, focus = false) {
   if (focus) tab.focus();
   try { localStorage.setItem('tab', tab.id); } catch { /* storage blocked: the choice just isn't kept */ }
   // The explorer's view lives in the hash while it shows, so the address can be shared; other tabs don't keep it.
+  // A #list= or #search= link is left alone: it opens over whichever tab shows.
   if (tab.id === 'tab-explorer') {
-    if (!parseExplore(location.hash)) history.replaceState(null, '', exploreHash(exploreView));
+    if (location.hash.length <= 1) history.replaceState(null, '', exploreHash(exploreView));
     renderExplorer();
   } else if (parseExplore(location.hash)) {
     history.replaceState(null, '', location.pathname + location.search);

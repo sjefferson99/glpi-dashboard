@@ -376,3 +376,35 @@ def test_only_the_explorer_grows_on_a_wide_window(page: Page, dashboard, width, 
         assert page.evaluate("document.documentElement.scrollWidth") <= width
     else:
         assert explorer["width"] == pytest.approx(summary["width"], abs=1)
+
+
+def test_a_failing_explorer_is_asked_again_only_at_the_next_poll(page: Page, dashboard):
+    asked = []
+
+    def fail(route):
+        asked.append(1)
+        route.fulfill(status=500, json={"error": "boom"})
+
+    page.route("**/api/explorer", fail)
+    page.clock.install()
+    page.goto("/")
+    expect(page.locator("#updated")).to_contain_text("Updated")
+    page.get_by_role("tab", name="Record explorer").click()
+    expect(page.locator("#explore-error")).to_be_visible()
+    page.wait_for_timeout(500)
+    assert len(asked) == 1
+    page.clock.run_for(60_000)                 # the next poll
+    expect(page.locator("#updated")).to_contain_text("Updated")
+    page.wait_for_timeout(500)
+    assert len(asked) == 2
+
+
+@pytest.mark.parametrize("link, opened", [("#list=open-incidents", "#list-title"), ("#search=backup", "#list-search")])
+def test_a_list_or_search_link_opens_when_the_explorer_was_the_last_tab(page: Page, dashboard, link, opened):
+    open_explorer(page)
+    page.goto("about:blank")
+    page.goto("/" + link)
+    expect(page.locator("dialog#list")).to_be_visible()
+    expect(page.locator(opened)).to_be_visible()
+    expect(page).to_have_url(re.compile(re.escape(link) + "$"))
+    expect(page.get_by_role("tab", name="Record explorer")).to_have_attribute("aria-selected", "true")
