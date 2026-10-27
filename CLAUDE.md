@@ -21,7 +21,10 @@ That belongs in the issue and the PR.
 | `app/main.py` | FastAPI app: background refresh loop, `/api/snapshot`, `/api/refresh`, `/healthz`, security headers |
 | `app/static/` | `index.html`, `app.js`, `style.css`, `logo.svg`, served by the same app |
 | `Dockerfile` | Pinned `python:*-slim`, runs as UID 10001 |
-| `compose.yml` | Generic: build locally, publish on localhost; commented reverse-proxy example |
+| `compose.yml` | Generic deploy: pulls the GHCR image, publishes on localhost; commented reverse-proxy example |
+| `compose.dev.yml` | Override that builds from the checkout instead (`glpi-dashboard:local`) |
+| `.github/workflows/container.yml` | CI: both test suites, then the image. PRs build only; `main` and `v*.*.*` tags push to GHCR |
+| `.github/dependabot.yml` | Weekly updates for pip, the Docker base image and the Actions |
 | `.env.example` | Settings with placeholder values. Copy it to `.env` (gitignored) |
 
 ## Git workflow: issue → branch → PR → merge
@@ -46,8 +49,10 @@ That belongs in the issue and the PR.
   sub-agents**. Reproduce each finding against a crafted input before reporting it. Post the findings as PR
   comments (labelled as below), then stop. Fixes wait for the user's approval, even obvious ones. Re-run the
   reproduction after an approved fix. Leave resolving threads to the user.
-- Before merging, check that `gh pr view <N> --json mergeable,mergeStateStatus` reports `MERGEABLE`/`CLEAN`.
-  CI green isn't the same as merge-clean.
+- **CI must be green before a merge** (`gh pr checks <N>`). Also check that `gh pr view <N> --json
+  mergeable,mergeStateStatus` reports `MERGEABLE`/`CLEAN`: CI green isn't the same as merge-clean.
+- After a merge to `main`, confirm the `Container` workflow pushed the image (`gh run list --workflow
+  container.yml --branch main --limit 1`).
 - Commit messages use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `docs:`,
   `test:`, `refactor:` or `chore:`, plus an optional scope (`ui`, `api`, `model`, `glpi`, `ci`). Add
   `(#<n>)` to the subject when there's an issue.
@@ -151,7 +156,8 @@ uv pip install pip                                                 # once: Snyk'
 The container, against a real GLPI:
 
 ```powershell
-docker compose up -d --build      # always --build: the image is built from local source
+docker compose -f compose.yml -f compose.dev.yml up -d --build   # build from this checkout
+bash scripts/smoke-test.sh glpi-dashboard:local                   # the CI image check: starts it with no GLPI
 docker compose ps                 # expect (healthy)
 docker compose logs -f            # expect "refreshed: N records"; look for "failed" / "cannot read"
 ```
@@ -163,6 +169,9 @@ GLPI, the page shows the "first refresh still running" or error banner, and `/he
 
 - Run a Snyk Code scan (`snyk_code_scan`) on new or modified first-party code. Fix any new findings in the
   changed code and rescan until it reports none.
+- **GitHub Actions are pinned to a full commit SHA**, with the version in a trailing comment. When adding
+  or bumping one, pick a release at least two weeks old. Lint workflow changes with actionlint:
+  `MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd -W):/repo:ro" -w /repo rhysd/actionlint:1.7.12 -no-color`.
 - After changing the `Dockerfile`, the base image or `requirements.txt`, also run a Snyk container scan
   and an SCA scan. Pins are exact: bump them deliberately, not with ranges.
 

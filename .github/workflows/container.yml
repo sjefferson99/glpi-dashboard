@@ -1,0 +1,85 @@
+# Tests, then the container image: PRs build it without pushing; main and vX.Y.Z tags publish it to GHCR.
+name: Container
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+      - name: Install
+        run: |
+          uv venv --python 3.14 .venv
+          uv pip install -r requirements.txt -r requirements-dev.txt
+          # Headless shell only, and no --with-deps: the runner image already has Chromium's libraries,
+          # and the apt step (fonts, xvfb) can take 10+ minutes on a slow Ubuntu mirror.
+          .venv/bin/python -m playwright install --only-shell chromium
+      - name: Unit and API tests
+        run: .venv/bin/python -m pytest
+      - name: UI tests
+        run: .venv/bin/python -m pytest ui-tests
+
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302  # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          # main -> latest + sha-<short>; vX.Y.Z -> X.Y.Z, X.Y, latest (flavor latest=auto) + sha-<short>.
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+      - name: Build for the smoke test
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: glpi-dashboard:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      # The tests run against the venv, not the image: start it, so a broken image is never published.
+      - name: Smoke test the image
+        run: bash scripts/smoke-test.sh glpi-dashboard:ci
+      - name: Push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

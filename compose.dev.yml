@@ -1,0 +1,6 @@
+# Local development override: build from this checkout instead of pulling from GHCR.
+#   docker compose -f compose.yml -f compose.dev.yml up -d --build
+services:
+  glpi-dashboard:
+    build: .
+    image: glpi-dashboard:local
