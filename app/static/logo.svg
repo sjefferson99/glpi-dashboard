@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="GLPI dash">
+  <title>GLPI dash</title>
+  <!-- Line-drawn screen with a small dashboard: tiles, a status bar row and a tick. -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="5" y="8" width="54" height="36" rx="5" stroke="#2f3f64" stroke-width="3.5"/>
+    <path d="M24 54h16M32 44v10" stroke="#2f3f64" stroke-width="3.5"/>
+    <rect x="12" y="15" width="11" height="9" rx="2" stroke="#2f3f64" stroke-width="2.5"/>
+    <rect x="27" y="15" width="11" height="9" rx="2" stroke="#2f3f64" stroke-width="2.5"/>
+    <path d="M13 36v-4M19 36v-7M25 36v-2M31 36v-5" stroke="#f5b82e" stroke-width="3"/>
+    <path d="M42 30l4 4 7-8" stroke="#f5b82e" stroke-width="3.5"/>
+  </g>
+</svg>

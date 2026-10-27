@@ -1,0 +1,6 @@
+# Test dependencies, on top of requirements.txt:
+#   uv pip install -r requirements.txt -r requirements-dev.txt
+#   .venv\Scripts\python.exe -m playwright install chromium
+pytest==9.1.1
+pytest-playwright==0.8.0
+playwright==1.60.0

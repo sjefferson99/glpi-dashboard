@@ -1,0 +1,40 @@
+services:
+  glpi-dashboard:
+    build: .
+    image: glpi-dashboard:local
+    container_name: glpi-dashboard
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # GLPI_APP_TOKEN, GLPI_USER_TOKEN and the rest: copy .env.example to .env (keep it readable only by admins)
+    env_file: .env
+    environment:
+      TZ: Europe/London
+    # The page shows internal GLPI data and has no login of its own: publish it only to localhost,
+    # and put an authenticating reverse proxy in front for anything else (example below).
+    ports:
+      - "127.0.0.1:8000:8000"
+
+    # Behind a reverse proxy instead: remove `ports`, join the proxy's network, and route through
+    # its auth middleware. Leave /healthz without auth for a monitor - it answers only ok and a time.
+    # Traefik example (names are placeholders):
+    #
+    # networks:
+    #   - proxy
+    # labels:
+    #   - "traefik.enable=true"
+    #   - "traefik.http.routers.glpi-dashboard.rule=Host(`dash.example.com`)"
+    #   - "traefik.http.routers.glpi-dashboard.tls=true"
+    #   - "traefik.http.routers.glpi-dashboard.middlewares=my-auth@file"
+    #   - "traefik.http.routers.glpi-dashboard-health.rule=Host(`dash.example.com`) && Path(`/healthz`)"
+    #   - "traefik.http.routers.glpi-dashboard-health.tls=true"
+    #   - "traefik.http.services.glpi-dashboard.loadbalancer.server.port=8000"
+
+# networks:
+#   proxy:
+#     external: true
