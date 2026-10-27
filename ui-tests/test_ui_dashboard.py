@@ -614,6 +614,33 @@ def test_clicking_the_backdrop_closes_the_list(page: Page, dashboard):
     expect_closed(page)
 
 
+def test_dragging_a_selection_out_of_the_list_keeps_it_open(page: Page, dashboard):
+    open_page(page)
+    tile(page, "Open incidents").click()
+    expect(dialog(page)).to_be_visible()
+    status = page.locator("#list-rows tr").first.locator("td").nth(2)     # plain text, not a link
+    box = status.bounding_box()
+    page.mouse.move(box["x"] + 2, box["y"] + box["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(3, 3, steps=10)                       # release over the backdrop
+    page.mouse.up()
+    assert page.evaluate("getSelection().toString().length") > 0
+    expect(dialog(page)).to_be_visible()
+    expect(page).to_have_url(re.compile(r"#list=open-incidents$"))
+
+
+def test_pressing_on_the_backdrop_and_releasing_inside_keeps_it_open(page: Page, dashboard):
+    open_page(page)
+    tile(page, "Open incidents").click()
+    expect(dialog(page)).to_be_visible()
+    box = dialog(page).bounding_box()
+    page.mouse.move(3, 3)
+    page.mouse.down()
+    page.mouse.move(box["x"] + 4, box["y"] + 4, steps=5)
+    page.mouse.up()
+    expect(dialog(page)).to_be_visible()
+
+
 def test_clicking_inside_the_list_keeps_it_open(page: Page, dashboard):
     open_page(page)
     tile(page, "Open incidents").click()

@@ -386,11 +386,18 @@ const dialog = document.getElementById('list');
 dialog.addEventListener('close', () => {
   if (location.hash.startsWith('#list=')) history.replaceState(null, '', location.pathname + location.search);
 });
-// A click on the backdrop targets the dialog itself, but so does one on its padding: only close outside the box.
-dialog.addEventListener('click', (e) => {
-  if (e.target !== dialog) return;
+// A click on the backdrop targets the dialog itself, but so does one on its padding, and so does a drag (a text
+// selection) that starts inside and ends on the backdrop. Close only when the press and the release were both
+// outside the box.
+const outsideDialog = (e) => {
   const box = dialog.getBoundingClientRect();
-  if (e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom) dialog.close();
+  return e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom;
+};
+let pressedOutside = false;
+dialog.addEventListener('pointerdown', (e) => { pressedOutside = e.target === dialog && outsideDialog(e); });
+dialog.addEventListener('click', (e) => {
+  if (e.target === dialog && pressedOutside && outsideDialog(e)) dialog.close();
+  pressedOutside = false;
 });
 document.querySelector('#list .close').addEventListener('click', (e) => {
   e.preventDefault();
