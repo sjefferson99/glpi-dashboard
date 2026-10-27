@@ -26,6 +26,8 @@ That belongs in the issue and the PR.
 | `.github/workflows/container.yml` | CI: both test suites, then the image. PRs build only; `main` and `v*.*.*` tags push to GHCR |
 | `.github/dependabot.yml` | Weekly updates for pip, the Docker base image and the Actions |
 | `.env.example` | Settings with placeholder values. Copy it to `.env` (gitignored) |
+| `tests/demo_glpi.py` | A realistic demo dataset (fixed seed, generic names) for the README screenshots |
+| `scripts/demo.py` | Serves the app on the demo data (port 8001), or takes one screenshot of it (`shot`) |
 
 ## Git workflow: issue → branch → PR → merge
 
@@ -55,6 +57,30 @@ That belongs in the issue and the PR.
 - **Review the README before every PR push.** Read it against the branch's changes (`git diff main...`) and
   update anything they made out of date: what the page shows, endpoints, settings, how it works. Do it
   every time, including pushes to an open PR, not only for big features.
+- **README screenshots: retake only what a change visibly altered.** Every image in `docs/screenshots/` stays
+  in git history for good, so they're never regenerated as a set. Before the PR is merged:
+  - **Retake an image** only when the branch changed what that screen looks like: its layout, wording, colours,
+    or what it shows. Retake just that image, with its own command from the table below, look at it, and
+    update the README text beside it if needed.
+  - **Add an image** for a new tab or a feature worth showing, beside its description in the README, and add
+    its command to the table.
+  - **Don't retake** anything else. That covers screens the change didn't touch, a change to the demo data on
+    its own, and a retake "to refresh" one. A retake of an unchanged screen can differ by a few pixels, which
+    would add a near-identical copy to history.
+  - Images come only from the demo data (`scripts/demo.py shot`), never a real GLPI. Light theme only, for now:
+    dark ones wait for a dark mode toggle. If a change needs the demo data to show it, extend
+    `tests/demo_glpi.py`, keeping it generic.
+
+  | Image | Command (`.venv\Scripts\python.exe scripts/demo.py shot docs/screenshots/<image> ...`) |
+  |---|---|
+  | `summary.png` | `--tab Summary` |
+  | `in-flight.png` | `--tab "In flight"` |
+  | `recurring.png` | `--tab "Recurring changes"` |
+  | `cmdb.png` | `--tab CMDB` |
+  | `risks.png` | `--tab "Risk analysis"` |
+  | `explorer.png` | `--tab "Record explorer"` |
+  | `list.png` | `--link "#list=high-priority" --element "#list"` |
+  | `search.png` | `--link "#search=vpn&closed=1" --element "#list"` |
 - **A Claude code review before every merge.** Run `/code-review` on the PR as **one sequential pass with no
   sub-agents**. Reproduce each finding against a crafted input before reporting it. Post the findings as PR
   comments (labelled as below), then stop. Fixes wait for the user's approval, even obvious ones. Re-run the
@@ -149,6 +175,9 @@ That belongs in the issue and the PR.
   on a free port, fed by the same fake GLPI. **Any change to `app/static/` needs a UI test.** Tests act
   as a user would (click, keyboard, visible text). Never reach into the page's JS state, except to check
   that an XSS payload didn't run.
+- `tests/demo_glpi.py` is a second, larger dataset for the demo and screenshots only. Tests check it's
+  repeatable, generic and fills every view, not its exact numbers. Changing it changes what every screenshot
+  would show, so keep changes to what a new screen needs; leave `fake_glpi.dataset()` as the tests' fixed one.
 - Match the run to the change: a frontend-only change needs `ui-tests/`, and a backend change needs
   both suites. Run both before asking for a merge.
 
@@ -165,6 +194,9 @@ uv pip install pip                                                 # once: Snyk'
 .venv\Scripts\python.exe -m pytest                                 # unit + API tests (tests/)
 .venv\Scripts\python.exe -m pytest ui-tests                        # UI tests, headless Chromium
 .venv\Scripts\python.exe -m pytest ui-tests --headed --slowmo 300  # watch the UI tests run
+.venv\Scripts\python.exe scripts/demo.py                           # the page on demo data, at 127.0.0.1:8001
+.venv\Scripts\python.exe scripts/demo.py shot --help               # one README image: see the screenshots rule
+
 ```
 
 The container, against a real GLPI:
