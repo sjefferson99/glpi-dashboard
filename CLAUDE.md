@@ -58,7 +58,10 @@ That belongs in the issue and the PR.
 - **A Claude code review before every merge.** Run `/code-review` on the PR as **one sequential pass with no
   sub-agents**. Reproduce each finding against a crafted input before reporting it. Post the findings as PR
   comments (labelled as below), then stop. Fixes wait for the user's approval, even obvious ones. Re-run the
-  reproduction after an approved fix. Leave resolving threads to the user.
+  reproduction after an approved fix. Once a fix is pushed, reply in the thread (labelled as below) with the
+  fixing commit, what the reproduction shows now, and the new test, then resolve the thread. Resolve only
+  threads documented that way. Leave any other thread (a question, a skipped finding, a reviewer's own
+  comment) for the user.
 - **CI must be green before a merge** (`gh pr checks <N>`). Also check that `gh pr view <N> --json
   mergeable,mergeStateStatus` reports `MERGEABLE`/`CLEAN`: CI green isn't the same as merge-clean.
 - After a merge to `main`, confirm the `Container` workflow pushed the image (`gh run list --workflow
