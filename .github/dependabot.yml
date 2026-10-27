@@ -1,26 +1,39 @@
 version: 2
-# Each ecosystem's updates come as one PR a week, so main builds one image per round, not one per bump.
+# Updates come grouped, at most one PR per group a week, so main builds one image per round, not one per bump.
+# A week's cooldown on anything that reaches CI or the image: a hijacked release passes the tests, and is usually
+# caught within days. Cooldown covers version updates only; security updates arrive at once and are checked by hand.
 updates:
   - package-ecosystem: pip
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
+    # Runtime and test tooling apart, so a Playwright release that breaks a test doesn't hold up fastapi. By name:
+    # Dependabot can't tell requirements-dev.txt's packages from requirements.txt's by type.
     groups:
-      pip:
+      dev:
+        patterns: ["pytest*", "playwright"]
+      runtime:
         patterns: ["*"]
+        exclude-patterns: ["pytest*", "playwright"]
   - package-ecosystem: docker
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     # Patch updates only: a new Python minor means bumping CI's and the venv's Python too, deliberately.
     ignore:
       - dependency-name: python
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
+    groups:
+      docker:
+        patterns: ["*"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
-    # A week before taking a new Action release: a hijacked one runs with CI's token and is usually caught by then.
     cooldown:
       default-days: 7
     groups:

@@ -24,7 +24,7 @@ That belongs in the issue and the PR.
 | `compose.yml` | Generic deploy: pulls the GHCR image, publishes on localhost; commented reverse-proxy example |
 | `compose.dev.yml` | Override that builds from the checkout instead (`glpi-dashboard:local`) |
 | `.github/workflows/container.yml` | CI: both test suites, then the image. PRs build only; `main` and `v*.*.*` tags push to GHCR |
-| `.github/dependabot.yml` | Weekly updates for pip, the Docker base image and the Actions |
+| `.github/dependabot.yml` | Weekly grouped updates (pip runtime, pip dev, base image patches, Actions), each after a 7-day cooldown |
 | `.env.example` | Settings with placeholder values. Copy it to `.env` (gitignored) |
 | `tests/demo_glpi.py` | A realistic demo dataset (fixed seed, generic names) for the README screenshots |
 | `scripts/demo.py` | Serves the app on the demo data (port 8001), or takes one screenshot of it (`shot`) |
@@ -41,6 +41,10 @@ That belongs in the issue and the PR.
   `1-ghcr-image`) off an up-to-date `main`, then a PR to `main`, then a merge. Don't commit straight to
   `main` unless the user says this change is an exception.
 - If the work has no issue yet, offer to create one before starting.
+- **Dependabot PRs are the exception: no issue.** Combine the open ones on one branch, `deps-<YYYY-MM-DD>`,
+  by merging each Dependabot branch into it (fix any conflict and anything that breaks on that branch), then one
+  PR, so `main` builds one image, not one per bump. **Merge that PR with a merge commit** (`gh pr merge --merge`):
+  then Dependabot's commits land unchanged and their PRs show as merged. A squash or rebase leaves them open.
 - **A PR for issue-driven work has `Closes #<n>` on its own line near the top of the body**, so merging
   closes the issue. The rest of the body is a summary and a test plan: what was checked, and how.
 - One issue = one branch = one PR. For a multi-step feature, prefer one branch with sequential commits, with
@@ -216,16 +220,17 @@ GLPI, the page shows the "first refresh still running" or error banner, and `/he
 - Run a Snyk Code scan (`snyk_code_scan`) on new or modified first-party code. Fix any new findings in the
   changed code and rescan until it reports none.
 - **GitHub Actions are pinned to a full commit SHA**, with the version in a trailing comment. When adding
-  or bumping one, pick a release at least **one week** old (Dependabot's `cooldown` waits for this). A
-  hijacked Action release runs with CI's token and could push a tampered image, and tests wouldn't notice;
-  such releases are usually caught within days. Lint workflow changes with actionlint:
+  or bumping one, pick a release at least **one week** old. Lint workflow changes with actionlint:
   `MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd -W):/repo:ro" -w /repo rhysd/actionlint:1.7.12 -no-color`.
-- **Python packages and the base image take the latest release**, with no wait: the test suites exercise
-  them, so fix what breaks.
+- **Every dependency waits a week before it's taken: Actions, Python packages and the base image.** A hijacked
+  release passes the tests: an Action runs with CI's token and could push a tampered image, and a Python
+  package runs in the deployed container beside the GLPI tokens. Such releases are usually caught within days.
+  Dependabot's `cooldown` enforces the week for its routine version updates only. Check the release date
+  yourself for a Dependabot *security* update or a bump made by hand, and take a security fix sooner only when
+  the user decides to. Beyond that wait, take the newest release and fix what breaks. The base image takes the
+  newest **patch** only: a new Python minor is bumped deliberately, with the venv and CI (see Commands).
 - After changing the `Dockerfile`, the base image or `requirements.txt`, also run a Snyk container scan
   and an SCA scan. Pins are exact: bump them deliberately, not with ranges.
-- **Dependabot PRs need no issue.** Combine the open ones on one branch (`deps-<date>`) into one PR, so `main`
-  builds one image, not one per bump. Dependabot groups each ecosystem's weekly updates into one PR anyway.
 
 ## Working rules
 
@@ -253,3 +258,7 @@ GLPI, the page shows the "first refresh still running" or error banner, and `/he
   command with `MSYS_NO_PATHCONV=1`.
 - Git Bash fakes the executable bit, so a new script can look executable locally and still be committed as
   100644. Use `git update-index --chmod=+x`.
+- Installed packages' `*.dist-info\licenses` folders come out read-only, so a later `uv pip install` that
+  upgrades or downgrades one fails with "failed to remove directory ... Access is denied" and leaves the venv
+  half-changed. Recreate the venv instead: delete `.venv` (clear the read-only flags first), then run the
+  once-only commands under Commands again.
