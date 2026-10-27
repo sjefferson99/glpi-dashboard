@@ -70,15 +70,31 @@ Copy `.env.example` to `.env` and fill it in. Keep `.env` readable only by admin
 
 ## Running
 
+The image is published to GHCR as `ghcr.io/sjefferson99/glpi-dashboard`. Put `compose.yml` and your `.env`
+in one folder, then:
+
 ```bash
-docker compose up -d --build
+docker compose pull && docker compose up -d
 docker compose ps                    # expect (healthy)
 docker compose logs | grep -E "refreshed|failed|cannot read|unavailable"   # expect "refreshed: N records"
 ```
 
-The image is built from `Dockerfile`, which uses a pinned `python:*-slim` base and pinned
-`requirements.txt`, and runs `apt-get upgrade` for Debian fixes. **Rebuild (`--build`) after any change.**
-The container runs read-only as UID 10001 with all capabilities dropped. It holds no data to back up.
+To upgrade, run the same `pull && up -d`.
+
+| Tag | Built from |
+|---|---|
+| `latest` | The latest commit on `main`, or the latest release |
+| `X.Y.Z`, `X.Y` | A release tag `vX.Y.Z` |
+| `sha-<commit>` | One exact commit |
+
+Pin `X.Y.Z` or `sha-*` in `compose.yml` to control when upgrades happen.
+
+To build from a checkout instead: `docker compose -f compose.yml -f compose.dev.yml up -d --build`.
+
+The image uses a pinned `python:*-slim` base and pinned `requirements.txt`, and runs `apt-get upgrade` for
+Debian fixes. CI (`.github/workflows/container.yml`) runs both test suites before building. A PR only
+builds the image; a push to `main` or a `v*.*.*` tag publishes it. The container runs read-only as UID
+10001 with all capabilities dropped. It holds no data to back up.
 
 **The page shows internal GLPI data and has no login of its own.** `compose.yml` publishes it on localhost
 only. To serve it more widely, put it behind a reverse proxy that authenticates users. `compose.yml` has a

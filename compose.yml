@@ -1,7 +1,8 @@
+# Deploy: docker compose pull && docker compose up -d
+# Develop: docker compose -f compose.yml -f compose.dev.yml up -d --build   (builds from this checkout)
 services:
   glpi-dashboard:
-    build: .
-    image: glpi-dashboard:local
+    image: ghcr.io/sjefferson99/glpi-dashboard:latest
     container_name: glpi-dashboard
     restart: unless-stopped
     read_only: true
