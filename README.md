@@ -26,9 +26,15 @@ The page has five tabs. The browser remembers the last one you chose.
   created it, so a change counts if its title starts with the recurring change's name (ignoring case; the
   longest matching name wins).
 - **CMDB**: the hosts and stacks (CIs) with open incidents or problems, rated like the areas.
-- **Risks**: open problems and changes (not Applied, not standard changes) ranked by a score made of
-  priority, security area, an internet-facing CI, age, and open incidents on a problem. The weights are
-  `RISK_*` in `app/model.py`, and the "Why" column shows each record's breakdown, so they're easy to tune.
+- **Risk analysis**: open problems and changes (not Applied, not standard changes), as a two-ring chart
+  beside a table of the same counts. The inner ring splits them by priority, and the outer ring splits each
+  priority into problems and changes. **Record type** swaps the rings. **Colours** picks how priority is
+  shown: *Traffic light* (green for Very low through to red for Major) or *Heat* (one red, deeper for higher
+  priority). The browser remembers both choices. Each segment and each number in the table opens its
+  records, ranked by a score made of priority, security area, an internet-facing CI, age and open incidents
+  on a problem; the table's All / All opens every one. The weights are `RISK_*` in `app/model.py`, and the
+  "Why" column shows each record's breakdown, so they're easy to tune. The table names every priority, so
+  colour is never the only cue: six traffic-light steps can't all stay distinct for colour-blind readers.
 
 Each kind of record has its own colour, used the same way everywhere: incidents blue, requests teal, problems
 orange, changes green and projects violet. Tiles that flag an issue across kinds (High priority, and record
@@ -56,7 +62,8 @@ serves the snapshot at `/api/snapshot`, along with the static page (`app/static/
 
 - **If GLPI is unreachable**, the last snapshot stays, with a banner.
 - **`/healthz`** fails once the data is three refreshes old.
-- **Refresh now** on the page (`POST /api/refresh`) re-reads GLPI at once, at most every 30 s
+- **Refresh now** (the circular-arrows button at the top right, beside the update time; `POST /api/refresh`)
+  re-reads GLPI at once, at most every 30 s
   (`MANUAL_MIN_SECONDS`). A click during a running refresh waits for it.
 
 It uses the **GLPI v1 API only** (`app/glpi.py`), because v2 has no endpoints for the links between records

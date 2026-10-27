@@ -12,7 +12,12 @@
   <header class="top">
     <h1><img src="logo.svg" alt="" class="logo">Network state</h1>
     <p class="meta"><span id="updated">Loading…</span> · from <a id="glpi-link" href="#" target="_blank" rel="noopener">GLPI</a>
-      <button id="refresh" class="btn" type="button">Refresh now</button></p>
+      <button id="refresh" class="icon-btn" type="button" aria-label="Refresh now" title="Refresh now">
+        <svg class="refresh-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 3v5h5"/>
+          <path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 21v-5h-5"/>
+        </svg>
+      </button></p>
   </header>
   <div id="error" class="banner" role="alert" hidden></div>
 
@@ -22,7 +27,7 @@
       <button type="button" role="tab" id="tab-flight" aria-controls="panel-flight">In flight</button>
       <button type="button" role="tab" id="tab-recurring" aria-controls="panel-recurring">Recurring changes</button>
       <button type="button" role="tab" id="tab-cmdb" aria-controls="panel-cmdb">CMDB</button>
-      <button type="button" role="tab" id="tab-risks" aria-controls="panel-risks">Risks</button>
+      <button type="button" role="tab" id="tab-risks" aria-controls="panel-risks">Risk analysis</button>
     </div>
 
     <section id="panel-summary" role="tabpanel" aria-labelledby="tab-summary" tabindex="0">
@@ -56,10 +61,23 @@
     </section>
 
     <section id="panel-risks" role="tabpanel" aria-labelledby="tab-risks" tabindex="0" hidden>
-      <h2 id="h-risks">Ranked risks</h2>
-      <p class="hint">Open problems and changes (not Applied, not standard changes) by score: priority, security area,
-        internet-facing CI, age, open incidents. <a id="risks-all" href="#list=risks-all">All <span></span> ranked</a></p>
-      <div class="scroll"><table id="risks" class="grid" aria-labelledby="h-risks"><tbody></tbody></table></div>
+      <h2 id="h-risks">Risks</h2>
+      <p class="hint">Open problems and changes (not Applied, not standard changes). Each one is scored on
+        priority, security area, internet-facing CI, age and open incidents. Pick a segment or a number to list its
+        records, highest score first; All / All lists every one.</p>
+      <div class="risk-tools">
+        <div class="toggle" role="group" aria-label="Inner ring">
+          <span class="toggle-label" aria-hidden="true">Inner ring:</span>
+          <button type="button" class="btn" data-inner="priority" aria-pressed="true">Priority</button>
+          <button type="button" class="btn" data-inner="kind" aria-pressed="false">Record type</button>
+        </div>
+        <div class="toggle" role="group" aria-label="Priority colours">
+          <span class="toggle-label" aria-hidden="true">Colours:</span>
+          <button type="button" class="btn" data-colours="traffic" aria-pressed="true">Traffic light</button>
+          <button type="button" class="btn" data-colours="heat" aria-pressed="false">Heat</button>
+        </div>
+      </div>
+      <div id="risks" class="risks"></div>
     </section>
   </main>
 

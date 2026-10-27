@@ -2,6 +2,7 @@
 import colorsys
 import re
 
+import httpx
 import pytest
 from playwright.sync_api import Page, expect
 
@@ -28,6 +29,12 @@ def dialog(page: Page):
     return page.locator("dialog#list")
 
 
+def open_all_risks(page: Page):
+    """Opens the full ranked list from the risk table's All / All number."""
+    show_tab(page, "Risk analysis")
+    page.locator("#risks tfoot td").last.get_by_role("link").click()
+
+
 def expect_closed(page: Page):
     # The dialog's close event clears the hash a moment after it hides.
     expect(dialog(page)).to_be_hidden()
@@ -52,8 +59,8 @@ def test_page_renders_every_section(page: Page, dashboard, console_errors):
     expect(page.locator("#recurring tbody tr")).to_have_count(2)
     show_tab(page, "CMDB")
     expect(page.locator("#cis tbody tr")).to_have_count(2)
-    show_tab(page, "Risks")
-    expect(page.locator("#risks tbody tr")).to_have_count(3)
+    show_tab(page, "Risk analysis")
+    expect(page.locator("#risks .seg")).to_have_count(5)            # High, Medium; then the 3 non-empty cells
     expect(page.locator("#error")).to_be_hidden()
     expect(page.locator("#glpi-link")).to_have_attribute("href", PUBLIC_URL + "/")
     # Nothing blocked by the CSP, no script errors.
@@ -74,12 +81,13 @@ def test_zero_tiles_are_marked(page: Page, dashboard):
 
 def test_risks_are_ranked_with_reasons(page: Page, dashboard):
     open_page(page)
-    show_tab(page, "Risks")
-    rows = page.locator("#risks tbody tr")
+    open_all_risks(page)
+    expect(page.locator("#list-title")).to_have_text("All open problems and changes, by risk score")
+    rows = page.locator("#list-rows tr")
+    expect(rows.locator("td:first-child")).to_have_text(["1", "2", "3"])
     expect(rows.nth(0)).to_contain_text("Change #1")
     expect(rows.nth(0).locator("td").nth(5)).to_have_text("75")
     expect(rows.nth(1).locator(".why")).to_contain_text("1 open incident(s) +5")
-    expect(page.locator("#risks-all span")).to_have_text("3")
 
 
 def test_rag_is_shown_as_icon_and_word_not_colour_alone(page: Page, dashboard):
@@ -128,9 +136,10 @@ def test_clicking_a_number_lists_exactly_those_records(page: Page, dashboard):
 def test_every_list_link_count_matches_its_rows(page: Page, dashboard):
     open_page(page)
     checked = 0
-    for name in ("Summary", "In flight", "Recurring changes", "CMDB", "Risks"):
+    for name in ("Summary", "In flight", "Recurring changes", "CMDB", "Risk analysis"):
         show_tab(page, name)
-        links = page.locator("main [role=tabpanel]:not([hidden]) a[href^='#list=']")
+        # Chart segments have no visible number; test_risk_segments_drill_into_their_records covers them.
+        links = page.locator("main [role=tabpanel]:not([hidden]) a[href^='#list=']:not(svg a)")
         for i in range(links.count()):
             link = links.nth(i)
             expected = int(re.search(r"\d+", link.inner_text())[0])
@@ -202,7 +211,7 @@ def test_refresh_button_works_from_the_keyboard(page: Page, dashboard):
     reads = dashboard.count("Ticket")
     page.locator("#refresh").focus()
     page.keyboard.press("Enter")
-    expect(page.locator("#refresh")).to_have_text("Refresh now")
+    expect(page.locator("#refresh")).to_have_accessible_name("Refresh now")
     expect(page.locator("#refresh")).to_be_enabled()
     assert dashboard.count("Ticket") == reads + 1
 
@@ -283,8 +292,10 @@ def test_glpi_text_is_shown_as_text_never_html(page: Page, dashboard, console_er
     expect(page.locator("#recurring")).to_contain_text("R " + XSS)
     show_tab(page, "CMDB")
     expect(page.locator("#cis")).to_contain_text("web1 " + XSS)
-    show_tab(page, "Risks")
-    expect(page.locator("#risks")).to_contain_text("C " + XSS)
+    open_all_risks(page)
+    expect(page.locator("#list-rows")).to_contain_text("C " + XSS)
+    expect(page.locator("#list-rows")).to_contain_text("Security " + XSS)
+    page.keyboard.press("Escape")
     assert page.locator("main img, dialog img, main script, dialog script").count() == 0
     assert page.evaluate("window.__xss") is None
 
@@ -302,7 +313,7 @@ def test_only_http_links_are_followed(page: Page, dashboard):
 def test_tabs_in_order_with_summary_first(page: Page, dashboard):
     open_page(page)
     tabs = page.get_by_role("tab")
-    expect(tabs).to_have_text(["Summary", "In flight", "Recurring changes", "CMDB", "Risks"])
+    expect(tabs).to_have_text(["Summary", "In flight", "Recurring changes", "CMDB", "Risk analysis"])
     expect(tabs.first).to_have_attribute("aria-selected", "true")
     expect(page.get_by_role("tabpanel")).to_have_count(1)     # hidden panels aren't exposed
     expect(page.get_by_role("tabpanel")).to_contain_text("Health at a glance")
@@ -311,10 +322,10 @@ def test_tabs_in_order_with_summary_first(page: Page, dashboard):
 
 def test_clicking_a_tab_shows_only_its_panel(page: Page, dashboard):
     open_page(page)
-    show_tab(page, "Risks")
-    expect(page.get_by_role("tab", name="Risks")).to_have_attribute("aria-selected", "true")
+    show_tab(page, "CMDB")
+    expect(page.get_by_role("tab", name="CMDB")).to_have_attribute("aria-selected", "true")
     expect(page.get_by_role("tab", name="Summary")).to_have_attribute("aria-selected", "false")
-    expect(page.locator("#panel-risks")).to_be_visible()
+    expect(page.locator("#panel-cmdb")).to_be_visible()
     expect(page.locator("#panel-summary")).to_be_hidden()
 
 
@@ -326,7 +337,7 @@ def test_tabs_work_from_the_keyboard(page: Page, dashboard):
     expect(page.locator("#panel-flight")).to_be_visible()
     page.keyboard.press("ArrowLeft")
     page.keyboard.press("ArrowLeft")                       # wraps round to the last tab
-    expect(page.get_by_role("tab", name="Risks")).to_be_focused()
+    expect(page.get_by_role("tab", name="Risk analysis")).to_be_focused()
     page.keyboard.press("Home")
     expect(page.get_by_role("tab", name="Summary")).to_be_focused()
     page.keyboard.press("End")
@@ -345,12 +356,20 @@ def test_the_chosen_tab_is_remembered(page: Page, dashboard):
 
 def test_a_list_opens_from_any_tab(page: Page, dashboard):
     open_page(page)
-    show_tab(page, "Risks")
-    page.locator("#risks-all").click()
-    expect(page.locator("#list-title")).to_have_text("All open problems and changes, by risk score")
+    show_tab(page, "CMDB")
+    page.locator("#cis tbody tr").first.get_by_role("link", name="1 - show list").first.click()
+    expect(page.locator("#list-title")).to_have_text("web1: open incidents")
     page.keyboard.press("Escape")
     expect_closed(page)
-    expect(page.locator("#panel-risks")).to_be_visible()
+    expect(page.locator("#panel-cmdb")).to_be_visible()
+
+
+def test_a_saved_tab_that_no_longer_exists_falls_back_to_summary(page: Page, dashboard):
+    open_page(page)
+    page.evaluate("localStorage.setItem('tab', 'tab-gone')")      # e.g. a tab a later version removed
+    open_page(page)
+    expect(page.get_by_role("tab", name="Summary")).to_have_attribute("aria-selected", "true")
+    expect(page.locator("#panel-summary")).to_be_visible()
 
 
 def test_record_quality_tiles(page: Page, dashboard):
@@ -502,9 +521,9 @@ def test_page_tables_sort_too(page: Page, dashboard):
     expect(cis).to_have_text(["web1internet", "db1"])
     page.locator("#cis").get_by_role("button", name="CI", exact=True).click()
     expect(cis).to_have_text(["db1", "web1internet"])
-    show_tab(page, "Risks")
-    page.locator("#risks").get_by_role("button", name="Score", exact=True).click()
-    expect(page.locator("#risks tbody tr td:nth-child(6)")).to_have_text(["55", "68", "75"])
+    open_all_risks(page)
+    dialog(page).get_by_role("button", name="Score", exact=True).click()
+    expect(page.locator("#list-rows tr td:nth-child(6)")).to_have_text(["55", "68", "75"])
 
 
 def test_sort_survives_a_refresh(page: Page, dashboard):
@@ -512,7 +531,7 @@ def test_sort_survives_a_refresh(page: Page, dashboard):
     show_tab(page, "CMDB")
     page.locator("#cis").get_by_role("button", name="CI", exact=True).click()
     page.locator("#refresh").click()
-    expect(page.locator("#refresh")).to_have_text("Refresh now")
+    expect(page.locator("#refresh")).to_have_accessible_name("Refresh now")
     expect(page.locator("#cis tbody tr td:first-child")).to_have_text(["db1", "web1internet"])
 
 
@@ -761,3 +780,274 @@ def test_kind_colours_meet_wcag_aa(page: Page, dashboard, scheme):
         page.keyboard.press("Escape")
         expect_closed(page)
     assert checked >= 8
+
+
+# --- risks chart ------------------------------------------------------------------------------------------------
+
+def segment(page: Page, name):
+    return page.locator("#risks svg").get_by_role("link", name=f"{name} - show list", exact=True)
+
+
+def point_in_segment(page: Page, name):
+    """A point well inside a segment, as a user would aim: a ring segment's bounding-box centre is often not on it."""
+    page.locator("#risks svg").scroll_into_view_if_needed()
+    x, y = segment(page, name).locator("path").evaluate("""(path) => {
+      const svg = path.ownerSVGElement, box = path.getBBox(), pt = svg.createSVGPoint();
+      const inside = (x, y) => [[0, 0], [5, 0], [-5, 0], [0, 5], [0, -5]]
+        .every(([dx, dy]) => { pt.x = x + dx; pt.y = y + dy; return path.isPointInFill(pt); });
+      for (let y = box.y; y <= box.y + box.height; y += 2) {
+        for (let x = box.x; x <= box.x + box.width; x += 2) {
+          if (!inside(x, y)) continue;
+          pt.x = x; pt.y = y;
+          const p = pt.matrixTransform(svg.getScreenCTM());
+          return [p.x, p.y];
+        }
+      }
+      throw new Error('no point inside the segment');
+    }""")
+    return x, y
+
+
+def click_segment(page: Page, name):
+    page.mouse.click(*point_in_segment(page, name))
+
+
+def open_risks(page: Page):
+    open_page(page)
+    show_tab(page, "Risk analysis")
+
+
+def test_risks_have_their_own_tab(page: Page, dashboard):
+    open_risks(page)
+    expect(page.locator("#panel-risks h2")).to_have_text(["Risks"])
+    expect(page.locator("#panel-summary")).to_be_hidden()
+    expect(page.locator("#panel-risks").get_by_role("link", name=re.compile("ranked"))).to_have_count(0)
+
+
+def test_risk_chart_rings_are_priority_then_record_type(page: Page, dashboard):
+    open_risks(page)
+    svg = page.locator("#risks svg")
+    expect(svg).to_have_attribute("aria-label", "Risks by priority, then record type")
+    expect(svg.get_by_role("link")).to_have_count(5)
+    for name in ("High priority: 1", "Medium priority: 2", "Changes at High priority: 1",
+                 "Problems at Medium priority: 1", "Changes at Medium priority: 1"):
+        expect(segment(page, name)).to_have_count(1)
+    expect(page.locator("#risks .centre-n")).to_have_text("3")
+    expect(page.locator("#risks .centre-label")).to_have_text("open risks")
+
+
+def test_risk_segments_drill_into_their_records(page: Page, dashboard):
+    open_risks(page)
+    click_segment(page, "Medium priority: 2")
+    expect(page).to_have_url(re.compile(r"#list=risks-p3$"))
+    expect(page.locator("#list-title")).to_have_text("Risks at Medium priority")
+    rows = page.locator("#list-rows tr")
+    # Highest score first, each with its overall rank.
+    expect(rows.locator("td:first-child")).to_have_text(["2", "3"])
+    expect(rows.nth(0)).to_contain_text("Problem #1")
+    expect(rows.nth(1)).to_contain_text("Change #2")
+    page.keyboard.press("Escape")
+    expect_closed(page)
+    click_segment(page, "Problems at Medium priority: 1")
+    expect(page.locator("#list-title")).to_have_text("Risks: problems at Medium priority")
+    expect(page.locator("#list-rows tr")).to_have_count(1)
+
+
+def test_every_risk_segment_count_matches_its_rows(page: Page, dashboard):
+    open_risks(page)
+    for inner in ("Priority", "Record type"):
+        page.locator(".toggle").get_by_role("button", name=inner).click()
+        links = page.locator("#risks svg a")
+        expect(links).to_have_count(5)
+        for i in range(links.count()):
+            label = links.nth(i).get_attribute("aria-label")
+            expected = int(re.search(r": (\d+) - show list$", label)[1])
+            click_segment(page, label.removesuffix(" - show list"))
+            expect(dialog(page)).to_be_visible()
+            expect(page.locator("#list-count")).to_have_text(re.compile(rf"^{expected} "))
+            expect(page.locator("#list-rows tr")).to_have_count(expected)
+            page.keyboard.press("Escape")
+            expect_closed(page)
+
+
+def test_record_type_toggle_swaps_the_rings_and_is_remembered(page: Page, dashboard):
+    open_risks(page)
+    toggle = page.get_by_role("group", name="Inner ring")
+    expect(toggle.get_by_role("button", name="Priority")).to_have_attribute("aria-pressed", "true")
+    toggle.get_by_role("button", name="Record type").click()
+    expect(toggle.get_by_role("button", name="Record type")).to_have_attribute("aria-pressed", "true")
+    expect(toggle.get_by_role("button", name="Priority")).to_have_attribute("aria-pressed", "false")
+    expect(page.locator("#risks svg")).to_have_attribute("aria-label", "Risks by record type, then priority")
+    expect(segment(page, "Problems: 1")).to_have_count(1)
+    expect(segment(page, "Changes: 2")).to_have_count(1)
+    # The outer ring is now coloured by priority.
+    expect(segment(page, "Changes at High priority: 1").locator("path")).to_have_class(re.compile(r"\bprio-4\b"))
+    open_risks(page)
+    expect(toggle.get_by_role("button", name="Record type")).to_have_attribute("aria-pressed", "true")
+    expect(segment(page, "Changes: 2")).to_have_count(1)
+
+
+def _fill(locator):
+    return locator.evaluate("e => getComputedStyle(e).fill")
+
+
+def test_colours_toggle_switches_priority_colours_and_is_remembered(page: Page, dashboard):
+    open_risks(page)
+    colours = page.get_by_role("group", name="Priority colours")
+    expect(colours.get_by_role("button", name="Traffic light")).to_have_attribute("aria-pressed", "true")
+    high = segment(page, "High priority: 1").locator("path")
+    swatch = page.locator("#risks tbody th .swatch").first
+    traffic = _fill(high)
+    assert swatch.evaluate("e => getComputedStyle(e).backgroundColor") == traffic
+    colours.get_by_role("button", name="Heat").click()
+    expect(colours.get_by_role("button", name="Heat")).to_have_attribute("aria-pressed", "true")
+    expect(colours.get_by_role("button", name="Traffic light")).to_have_attribute("aria-pressed", "false")
+    heat = _fill(high)
+    assert heat != traffic
+    assert swatch.evaluate("e => getComputedStyle(e).backgroundColor") == heat     # the table follows
+    # Record types keep their own colours either way.
+    assert _fill(segment(page, "Problems at Medium priority: 1").locator("path")) == page.locator(
+        "#risks thead .swatch.kind-problem").evaluate("e => getComputedStyle(e).backgroundColor")
+    open_risks(page)
+    expect(colours.get_by_role("button", name="Heat")).to_have_attribute("aria-pressed", "true")
+    assert _fill(segment(page, "High priority: 1").locator("path")) == heat
+
+
+def test_hovering_a_segment_shows_its_count_and_name(page: Page, dashboard):
+    open_risks(page)
+    caption = page.locator("#risks .risk-caption")
+    expect(caption).to_have_text("Pick a segment to list its records.")
+    page.mouse.move(*point_in_segment(page, "Medium priority: 2"))
+    expect(page.locator("#risks .centre-n")).to_have_text("2")
+    expect(caption).to_have_text("Medium priority: 2 of 3")
+    page.mouse.move(0, 0)
+    expect(page.locator("#risks .centre-n")).to_have_text("3")
+
+
+def test_risk_segments_work_from_the_keyboard(page: Page, dashboard):
+    open_risks(page)
+    page.get_by_role("button", name="Heat").focus()
+    page.keyboard.press("Tab")                               # the first segment
+    first = page.locator("#risks svg a").first
+    expect(first).to_be_focused()
+    expect(page.locator("#risks .risk-caption")).to_have_text("High priority: 1 of 3")
+    assert first.locator("path").evaluate("e => getComputedStyle(e).strokeWidth") == "3px"
+    page.keyboard.press("Enter")
+    expect(page.locator("#list-title")).to_have_text("Risks at High priority")
+
+
+def test_risk_table_holds_the_same_counts_as_the_chart(page: Page, dashboard):
+    open_risks(page)
+    table = page.locator("#risks table")
+    expect(table.locator("thead th")).to_have_text(["Priority", "Problems", "Changes", "All"])
+    expect(table.locator("tbody tr")).to_have_text([re.compile(r"High\s*0\s*1\s*1"), re.compile(r"Medium\s*1\s*1\s*2")])
+    expect(table.locator("tfoot tr")).to_have_text(re.compile(r"All\s*1\s*2\s*3"))
+    expect(table.locator("tbody tr").first.locator(".zero")).to_have_text("0")   # no list behind an empty cell
+    table.get_by_role("link", name="2 - show list").first.click()
+    expect(page.locator("#list-title")).to_have_text("Risks at Medium priority")
+
+
+def test_chart_and_table_are_the_same_height(page: Page, dashboard):
+    page.set_viewport_size({"width": 1100, "height": 900})
+    open_risks(page)
+    chart = page.locator("#risks .risk-chart").bounding_box()
+    table = page.locator("#risks table").bounding_box()
+    assert abs(chart["y"] - table["y"]) < 1
+    assert abs(chart["height"] - table["height"]) < 2
+
+
+def test_risk_chart_redraws_only_when_the_data_changes(page: Page, dashboard, base_url):
+    page.clock.install()
+    open_risks(page)
+    focused = segment(page, "Medium priority: 2")
+    focused.focus()
+    # New data elsewhere, picked up by the 60 s poll: the page redraws, but the chart (and its focus) stays.
+    dashboard.data["Ticket"].append({**dashboard.data["Ticket"][1], "id": 50})
+    assert httpx.post(base_url + "/api/refresh", timeout=10).status_code == 200
+    page.clock.run_for(61_000)
+    expect(page.locator("#summary .value").first).to_have_text("4")     # Open incidents, on the hidden Summary tab
+    expect(focused).to_be_focused()
+    dashboard.data["Problem"][0]["priority"] = 5
+    page.locator("#refresh").click()
+    expect(segment(page, "Very high priority: 1")).to_have_count(1)
+    expect(segment(page, "Medium priority: 1")).to_have_count(1)
+
+
+def test_no_open_risks(page: Page, dashboard):
+    dashboard.data["Problem"] = []
+    dashboard.data["Change"] = []
+    open_risks(page)
+    page.locator("#refresh").click()
+    expect(page.locator("#risks")).to_have_text("No open risks.")
+
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_heat_gets_deeper_with_priority_and_both_styles_have_six_colours(page: Page, dashboard, scheme):
+    page.emulate_media(color_scheme=scheme)
+    open_risks(page)
+    read = """(wrap) => [1, 2, 3, 4, 5, 6].map((p) => {
+      const box = document.createElement('div');
+      if (wrap) box.className = wrap;
+      const e = document.createElement('span');
+      e.className = 'swatch prio-' + p;
+      box.append(e);
+      document.body.append(box);
+      const c = getComputedStyle(e).backgroundColor;
+      box.remove();
+      return c.match(/\\d+/g).slice(0, 3).map(Number);
+    })"""
+    traffic, heat = page.evaluate(read, ""), page.evaluate(read, "colours-heat")
+    lum = [colorsys.rgb_to_hls(*(v / 255 for v in rgb))[1] for rgb in heat]
+    # Higher priority stands out more from the surface: darker in light mode, lighter in dark.
+    assert lum == sorted(lum, reverse=scheme == "light")
+    assert len(set(map(tuple, heat))) == 6 and len(set(map(tuple, traffic))) == 6
+    # Traffic light: Very low is green, Major is red.
+    r, g, _ = traffic[0]
+    assert g > r
+    r, g, _ = traffic[5]
+    assert r > g
+
+
+# --- header ---------------------------------------------------------------------------------------------------
+
+def test_header_puts_updated_and_refresh_right_on_the_titles_baseline(page: Page, dashboard):
+    page.set_viewport_size({"width": 1100, "height": 800})
+    open_page(page)
+    title = page.locator("h1").bounding_box()
+    meta = page.locator(".top .meta").bounding_box()
+    assert meta["x"] > title["x"] + title["width"]                   # to the right of the title
+    top = page.locator(".top").bounding_box()
+    assert abs((meta["x"] + meta["width"]) - (top["x"] + top["width"] - 16)) < 2   # right-aligned, inside the padding
+    assert abs((meta["y"] + meta["height"]) - (title["y"] + title["height"])) < 2     # bottoms line up
+    assert float(page.locator(".top .meta").evaluate("e => parseFloat(getComputedStyle(e).fontSize)")) < 14
+
+
+def test_refresh_is_an_icon_button_with_a_name(page: Page, dashboard):
+    open_page(page)
+    btn = page.get_by_role("button", name="Refresh now")
+    expect(btn).to_have_attribute("title", "Refresh now")
+    expect(btn).to_have_text(re.compile(r"^\s*$"))                     # no visible words, just the icon
+    expect(btn.locator("svg")).to_have_attribute("aria-hidden", "true")
+
+
+def test_refresh_says_it_is_busy_and_spins_while_it_runs(page: Page, dashboard):
+    open_page(page)
+    release = []
+    page.route("**/api/refresh", lambda route: release.append(route))
+    page.get_by_role("button", name="Refresh now").click()
+    busy = page.locator("#refresh")
+    expect(busy).to_have_accessible_name("Refreshing…")
+    expect(busy).to_be_disabled()
+    assert busy.locator("svg").evaluate("e => getComputedStyle(e).animationName") == "spin"
+    release[0].continue_()
+    expect(busy).to_have_accessible_name("Refresh now")
+    expect(busy).to_be_enabled()
+
+
+def test_refresh_icon_holds_still_for_reduced_motion(page: Page, dashboard):
+    page.emulate_media(reduced_motion="reduce")
+    open_page(page)
+    page.route("**/api/refresh", lambda route: None)                 # never answers: stays busy
+    page.locator("#refresh").click()
+    expect(page.locator("#refresh")).to_be_disabled()
+    assert page.locator("#refresh svg").evaluate("e => getComputedStyle(e).animationName") == "none"
