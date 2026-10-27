@@ -148,7 +148,8 @@ CHANGE_TEMPLATES = [
     ("Network", "Replace the faulty core switch uplink", ["core-switch"], "New optic and cable.", "Core switch"),
     ("Security", "Tighten mail filtering for look-alike domains", ["mail1"], "New filter rules.", "Phishing"),
     ("Hosting", "Retire the old reporting server", [], "Its reports moved to the new VM.", ""),
-    ("End-user > Printing", "Switch floor printers to the old paper supplier", ["printer-floor1"], "", "Floor printers"),
+    ("End-user > Printing", "Switch floor printers to the old paper supplier", ["printer-floor1"], "",
+     "Floor printers"),
     ("Network > Wi-Fi", "Add an access point at the end of floor 2", ["wifi-controller"], "", "Weak signal"),
     ("Hosting > Storage", "Expand the database volume on db1", ["db1"], "Add 500 GB.", ""),
     ("Applications", "Upgrade the accounting application", [], "Vendor's yearly release.", ""),
@@ -222,12 +223,16 @@ class _Demo:
         priority = r.choices(PRIORITIES, PRIORITY_WEIGHTS)[0]
         # GLPI returns rich text entity-encoded on some installs and plain HTML on others.
         content = f"<p>{text}</p>" if r.random() < 0.5 else f"&lt;p&gt;{text}&lt;/p&gt;"
+        # Each timestamp gets its own time of day, so on the day it was opened an update could come out earlier.
+        opened = self._d(age)
+        updated = max(self._d(idle), opened)
         return {"name": title, "status": status, "priority": priority, "urgency": priority, "impact": priority,
-                "itilcategories_id": self.cat_id.get(cat, 0), "date": self._d(age), "date_mod": self._d(idle),
+                "itilcategories_id": self.cat_id.get(cat, 0), "date": opened, "date_mod": updated,
                 "content": content, "_age": age, "_open": is_open, "_cis": ci_names,
                 "_assigned": not is_open or r.random() < 0.85, "_cat": cat}
 
     def tickets(self):
+        """Incidents and requests from ``TICKET_TEMPLATES``; most of the recent ones are open."""
         out = []
         for _ in range(TICKETS):
             cat, kind, title, cis, text = self.rng.choice(TICKET_TEMPLATES)
@@ -243,6 +248,7 @@ class _Demo:
         return out
 
     def problems(self):
+        """One problem per ``PROBLEM_TEMPLATES`` entry, with its CIs and the ticket titles it explains."""
         out = []
         for cat, title, cis, text, match in PROBLEM_TEMPLATES:
             rec = self._record(cat, title, cis, text, self._age(200, 600) + 5,
@@ -252,6 +258,7 @@ class _Demo:
         return out
 
     def changes(self):
+        """The ``CHANGE_TEMPLATES`` changes and those made by each recurring change, with approval and plans."""
         out = []
         for cat, title, cis, text, fixes in CHANGE_TEMPLATES:
             rec = self._record(cat, title, cis, text or "See the plan.", self._age(120, 500),
@@ -291,6 +298,7 @@ class _Demo:
             r["id"] = i
 
     def build(self):
+        """Every itemtype but the CIs: the records, numbered by date, and the links between them."""
         tickets, problems, changes = self.tickets(), self.problems(), self.changes()
         for rows in (tickets, problems, changes):
             self._number(rows)

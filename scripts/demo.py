@@ -5,10 +5,12 @@ nothing real is shown and shots taken months apart show the same data. Run from 
 
     .venv\\Scripts\\python.exe scripts/demo.py                  # browse it at http://127.0.0.1:8001, Ctrl+C stops
     .venv\\Scripts\\python.exe scripts/demo.py shot docs/screenshots/risks.png --tab "Risk analysis"
-    .venv\\Scripts\\python.exe scripts/demo.py shot docs/screenshots/list.png --link "#list=high-priority" --element "#list"
+    .venv\\Scripts\\python.exe scripts/demo.py shot docs/screenshots/list.png --link "#list=high-priority" ^
+        --element "#list"
 
-Take a new shot only when a change has altered that screen: each one is a binary file in git for good, and a
-retake of an unchanged screen can still differ by a few pixels.
+Serving needs only requirements.txt; ``shot`` also needs Playwright, from requirements-dev.txt. Take a new shot
+only when a change has altered that screen: each one is a binary file in git for good, and a retake of an
+unchanged screen can still differ by a few pixels.
 """
 import argparse
 import logging
@@ -20,7 +22,6 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path[:0] = [str(ROOT / "app"), str(ROOT / "tests")]
 
 import httpx  # noqa: E402 - after the path set-up, like the app's own imports
-from playwright.sync_api import expect, sync_playwright  # noqa: E402
 
 from demo_glpi import NOW, demo_dataset  # noqa: E402
 from fake_glpi import FakeGlpi  # noqa: E402
@@ -43,28 +44,55 @@ def shoot(browser, base_url, out, tab=None, link=None, element=None, theme="ligh
         width: The window's width in pixels.
         height: The window's height; the whole page is shot unless ``element`` crops it.
     """
+    from playwright.sync_api import expect     # here, so serving the demo doesn't need the test dependencies
+
     context = browser.new_context(viewport={"width": width, "height": height}, color_scheme=theme,
                                   reduced_motion="reduce")
-    page = context.new_page()
-    page.goto(base_url + "/")
-    expect(page.locator("#updated")).to_contain_text("Updated")
-    if tab:
-        page.get_by_role("tab", name=tab).click()
-    if link:
-        page.goto(base_url + "/" + link)
+    # Closed even when a view isn't found, so a shared browser isn't left with open pages.
+    try:
+        page = context.new_page()
+        page.goto(base_url + "/")
         expect(page.locator("#updated")).to_contain_text("Updated")
-    page.wait_for_load_state("networkidle")          # the explorer and search fetch their data after the snapshot
-    if link and link.startswith(("#list=", "#search=")):
-        expect(page.locator("#list-rows tr").first).to_be_visible()
-    # No hover tooltip, highlight or focus ring left over from a click or the dialog opening.
-    page.mouse.move(0, 0)
-    page.evaluate("document.activeElement && document.activeElement.blur()")
-    out.parent.mkdir(parents=True, exist_ok=True)
-    if element:
-        page.locator(element).screenshot(path=out, animations="disabled", caret="hide")
-    else:
-        page.screenshot(path=out, full_page=True, animations="disabled", caret="hide")
-    context.close()
+        if tab:
+            page.get_by_role("tab", name=tab).click()
+        if link:
+            page.goto(base_url + "/" + link)
+            expect(page.locator("#updated")).to_contain_text("Updated")
+        page.wait_for_load_state("networkidle")      # the explorer and search fetch their data after the snapshot
+        if link and link.startswith(("#list=", "#search=")):
+            expect(page.locator("#list-rows tr").first).to_be_visible()
+        # No hover tooltip, highlight or focus ring left over from a click or the dialog opening.
+        page.mouse.move(0, 0)
+        page.evaluate("document.activeElement && document.activeElement.blur()")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        if element:
+            page.locator(element).screenshot(path=out, animations="disabled", caret="hide")
+        else:
+            page.screenshot(path=out, full_page=True, animations="disabled", caret="hide")
+    finally:
+        context.close()
+
+
+def refresh(client, base_url):
+    """Reads the demo data into the app, or exits with the app's error.
+
+    A failed first refresh answers 503, as there's no snapshot to fall back on, so the error is read from the
+    body whatever the status.
+
+    Args:
+        client: An ``httpx.Client``.
+        base_url: The app.
+
+    Raises:
+        SystemExit: The refresh failed; the message is the app's error.
+    """
+    r = client.post(base_url + "/api/refresh", timeout=30)
+    try:
+        error = r.json().get("error")
+    except ValueError:
+        error = None
+    if r.status_code != 200 or error:
+        sys.exit(f"refresh failed: {error or f'HTTP {r.status_code}'}")
 
 
 def main():
@@ -83,10 +111,8 @@ def main():
     logging.getLogger("httpx").setLevel(logging.WARNING)     # not a line per fake GLPI request
 
     with serve(FakeGlpi(demo_dataset()), port=0 if args.command else PORT, now=NOW) as base_url:
-        r = httpx.post(base_url + "/api/refresh", timeout=30)
-        r.raise_for_status()
-        if r.json()["error"]:
-            sys.exit(f"refresh failed: {r.json()['error']}")
+        with httpx.Client() as client:
+            refresh(client, base_url)
         if not args.command:
             print(f"Demo GLPI dashboard at {base_url} - Ctrl+C to stop")
             try:
@@ -94,6 +120,8 @@ def main():
                     time.sleep(1)
             except KeyboardInterrupt:
                 return
+        from playwright.sync_api import sync_playwright
+
         with sync_playwright() as p:
             browser = p.chromium.launch()
             shoot(browser, base_url, args.out, args.tab, args.link, args.element, args.theme, args.width,

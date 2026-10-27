@@ -1,12 +1,17 @@
 """scripts/demo.py's `shot` still finds what it shoots, so the README images can be retaken after a UI change."""
 import importlib.util
+import socket
 import struct
+import time
 from pathlib import Path
 
 import httpx
 import pytest
 
+import main
 from demo_glpi import demo_dataset
+from fake_glpi import FakeGlpi
+from live_app import serve
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "demo.py"
 
@@ -49,3 +54,38 @@ def test_shot_of_a_dialog_is_cropped_to_it(demo, browser, base_url, demo_data, t
     demo.shoot(browser, base_url, out, link=link, element="#list")
     width, height = _png_size(out)
     assert 600 < width < 1280 and 100 < height < 800
+
+
+def test_a_failed_shot_closes_its_browser_context(demo, browser, base_url, demo_data, tmp_path):
+    open_before = len(browser.contexts)
+    with pytest.raises(Exception, match="Timeout"):
+        demo.shoot(browser, base_url, tmp_path / "none.png", tab="No such tab")
+    assert len(browser.contexts) == open_before
+    assert not (tmp_path / "none.png").exists()
+
+
+def test_serve_says_at_once_when_the_port_is_in_use():
+    with socket.socket() as taken:
+        taken.bind(("127.0.0.1", 0))
+        taken.listen()
+        started = time.monotonic()
+        with pytest.raises(RuntimeError, match="is port .* in use"):
+            with serve(FakeGlpi(), port=taken.getsockname()[1]):
+                pass
+    assert time.monotonic() - started < 10
+
+
+def test_serve_puts_the_apps_state_back_afterwards():
+    state, lock = main.state, main.refresh_lock
+    with serve(FakeGlpi(demo_dataset())) as url:
+        assert httpx.post(url + "/api/refresh", timeout=10).json()["error"] is None
+        assert main.state is not state
+    assert main.state is state and main.refresh_lock is lock
+
+
+def test_serve_inside_another_leaves_the_outer_app_working(base_url, dashboard):
+    """The lifespan closes its GLPI client on the shared app, so the outer server must get its own back."""
+    with serve(FakeGlpi()):
+        pass
+    r = httpx.post(base_url + "/api/refresh", timeout=10)
+    assert r.json()["error"] is None
