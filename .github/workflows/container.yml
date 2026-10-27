@@ -17,6 +17,7 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
@@ -24,7 +25,9 @@ jobs:
         run: |
           uv venv --python 3.14 .venv
           uv pip install -r requirements.txt -r requirements-dev.txt
-          .venv/bin/python -m playwright install --with-deps chromium
+          # Headless shell only, and no --with-deps: the runner image already has Chromium's libraries,
+          # and the apt step (fonts, xvfb) can take 10+ minutes on a slow Ubuntu mirror.
+          .venv/bin/python -m playwright install --only-shell chromium
       - name: Unit and API tests
         run: .venv/bin/python -m pytest
       - name: UI tests
@@ -33,6 +36,7 @@ jobs:
   image:
     needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       packages: write
