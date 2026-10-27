@@ -157,6 +157,7 @@ The container, against a real GLPI:
 
 ```powershell
 docker compose -f compose.yml -f compose.dev.yml up -d --build   # build from this checkout
+bash scripts/smoke-test.sh glpi-dashboard:local                   # the CI image check: starts it with no GLPI
 docker compose ps                 # expect (healthy)
 docker compose logs -f            # expect "refreshed: N records"; look for "failed" / "cannot read"
 ```
