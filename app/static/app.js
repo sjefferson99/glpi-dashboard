@@ -435,6 +435,382 @@ for (const name of Object.keys(RISK_CHOICES)) {
   }
 }
 
+// --- record explorer: every record as a treemap, up to three groupings deep; a box lists its records beside it ---
+
+const OPENED_BANDS = [[7, 'Last week'], [30, 'Last month'], [90, 'Last 3 months'], [365, 'Last year'],
+  [Infinity, 'Over a year ago']];
+// What records can be grouped by. `cls` colours a box whose records all share the value; only these can colour.
+// A `value` that's a list puts the record in a box for each (a record linked to two CIs is in both).
+const DIMS = {
+  kind: { label: 'Record type', value: (r) => r.kind, cls: (r) => kindClass(r.kind).trim() },
+  priority: { label: 'Priority', value: (r) => r.priority_name, cls: (r) => prioClass(r.priority) },
+  area: { label: 'Area', value: (r) => r.area },
+  category: { label: 'Category', value: (r) => r.category || 'Uncategorised' },
+  status: { label: 'Status', value: (r) => r.status },
+  open: { label: 'Open or closed', value: (r) => (r.open ? 'Open' : 'Closed'), cls: (r) => (r.open ? 'state-open' : 'state-closed') },
+  assigned: { label: 'Assigned', value: (r) => (r.assigned ? 'Assigned' : 'Unassigned') },
+  ci: { label: 'Has a CI', value: (r) => (r.cis.length ? 'Linked to a CI' : 'No CI') },
+  cis: { label: 'Linked CI', value: (r) => (r.cis.length ? r.cis : 'No CI') },
+  family: { label: 'Linked records', value: (r) => r.family || 'Not linked' },
+  opened: { label: 'Opened', value: (r) => OPENED_BANDS.find(([days]) => r.age_days <= days)[1] },
+  year: { label: 'Year opened', value: (r) => r.date.slice(0, 4) },
+};
+const COLOURS = ['kind', 'priority', 'open', 'none'];
+const EXPLORE_DEFAULT = { tiers: ['kind', 'priority', 'area'], colour: 'kind', closed: false, zoom: [], sel: [] };
+// Treemap sizes in px: a group's header and padding, and the smallest box that gets a label.
+const TM = { head: 18, headW: 48, pad: 2, inner: 6, labelW: 44, labelH: 16 };
+
+/**
+ * The explorer's view from a `#explore=` hash: groupings, colour, Include closed, and the zoomed and selected
+ * groups as paths of group names. Anything unknown falls back to the defaults.
+ * @param {string} hash
+ * @returns {Object|null} null if it isn't an explorer hash
+ */
+function parseExplore(hash) {
+  if (!hash.startsWith('#explore=')) return null;
+  const parts = Object.fromEntries(hash.slice(1).split('&').map((p) => {
+    const i = p.indexOf('=');
+    return i < 0 ? [p, ''] : [p.slice(0, i), p.slice(i + 1)];
+  }));
+  const path = (s) => { try { return s ? s.split('/').map(decodeURIComponent) : []; } catch { return []; } };
+  const tiers = [...new Set(parts.explore.split(',').filter((d) => Object.hasOwn(DIMS, d)))].slice(0, 3);
+  return { tiers: tiers.length ? tiers : EXPLORE_DEFAULT.tiers, colour: COLOURS.includes(parts.colour) ? parts.colour : 'kind',
+    closed: parts.closed === '1', zoom: path(parts.zoom), sel: path(parts.sel) };
+}
+
+/** The hash for an explorer view; each group name in a path is encoded, so `/` only ever separates them. */
+function exploreHash(v) {
+  const path = (p) => p.map(encodeURIComponent).join('/');
+  return `#explore=${v.tiers.join(',')}&colour=${v.colour}${v.closed ? '&closed=1' : ''}`
+    + (v.zoom.length ? '&zoom=' + path(v.zoom) : '') + (v.sel.length ? '&sel=' + path(v.sel) : '');
+}
+
+let exploreView = { ...EXPLORE_DEFAULT };
+try { exploreView = parseExplore(localStorage.getItem('explore') || '') || exploreView; } catch { /* storage blocked: the defaults */ }
+// The records from /api/explorer, and the refresh they were last asked for, so each refresh is fetched once.
+let explorerData = null;
+let explorerAsked = null;
+// What the explorer last drew, so the 60 s re-render leaves it (and the focus in it) alone.
+let explorerDrawn = null;
+let exploreListKey = null;
+let exploreSelPath = [];
+
+const pathText = (p) => (p.length ? p.join(' › ') : 'All records');
+const samePath = (a, b) => a.length === b.length && a.every((s, i) => s === b[i]);
+const recordsText = (n) => `${n} ${n === 1 ? 'record' : 'records'}`;
+
+/**
+ * Groups records into a tree, one level per dimension, biggest group first. A box's `size` is its records, or
+ * the sum of its children's: more than its records when a record is in several of them (e.g. two CIs).
+ * @param {Array<Object>} records
+ * @param {Array<string>} dims keys of DIMS
+ * @returns {{label: string, path: Array<string>, records: Array<Object>, children: Array<Object>, size: number}}
+ *   the root
+ */
+function groupTree(records, dims) {
+  const node = (label, path, recs) => {
+    const n = { label, path, records: recs, children: [], size: recs.length };
+    if (path.length < dims.length) {
+      const by = new Map();
+      for (const r of recs) {
+        const v = DIMS[dims[path.length]].value(r);
+        for (const one of new Set((Array.isArray(v) ? v : [v]).map((x) => String(x ?? '') || '(blank)'))) {
+          if (!by.has(one)) by.set(one, []);
+          by.get(one).push(r);
+        }
+      }
+      n.children = [...by].map(([v, rs]) => node(v, [...path, v], rs))
+        .sort((a, b) => b.size - a.size || a.label.localeCompare(b.label, 'en-GB', { numeric: true }));
+      n.size = n.children.reduce((s, c) => s + c.size, 0);
+    }
+    return n;
+  };
+  return node('All records', [], records);
+}
+
+/** The group at `path` under `root`, or null if there's none (say, after a refresh emptied it). */
+function findGroup(root, path) {
+  let n = root;
+  for (const label of path) {
+    n = n.children.find((c) => c.label === label);
+    if (!n) return null;
+  }
+  return n;
+}
+
+/**
+ * Lays out boxes whose areas are in proportion to `sizes` (largest first) as squarely as it can: the squarified
+ * treemap of Bruls, Huizing and van Wijk. Each row of boxes runs along the short side of what's left.
+ * @param {Array<number>} sizes
+ * @returns {Array<{x: number, y: number, w: number, h: number}>} one box per size, in the same order
+ */
+function squarify(sizes, x, y, w, h) {
+  const total = sizes.reduce((a, b) => a + b, 0);
+  if (!total || w <= 0 || h <= 0) return sizes.map(() => ({ x, y, w: 0, h: 0 }));
+  const areas = sizes.map((s) => (s * w * h) / total);
+  // The row's worst aspect ratio: adding a box to it is kept only while this doesn't get worse.
+  const worst = (sum, min, max, side) => Math.max((side * side * max) / (sum * sum), (sum * sum) / (side * side * min));
+  const out = [];
+  let i = 0;
+  while (i < areas.length) {
+    const side = Math.min(w, h);
+    let j = i + 1;
+    let sum = areas[i], min = areas[i], max = areas[i];
+    let ratio = worst(sum, min, max, side);
+    while (j < areas.length) {
+      const a = areas[j];
+      const next = worst(sum + a, Math.min(min, a), Math.max(max, a), side);
+      if (next > ratio) break;
+      sum += a; min = Math.min(min, a); max = Math.max(max, a); ratio = next; j++;
+    }
+    const thick = sum / side;
+    let at = 0;
+    for (let k = i; k < j; k++) {
+      const len = areas[k] / thick;
+      out.push(w >= h ? { x, y: y + at, w: thick, h: len } : { x: x + at, y, w: len, h: thick });
+      at += len;
+    }
+    if (w >= h) { x += thick; w -= thick; } else { y += thick; h -= thick; }
+    i = j;
+  }
+  return out;
+}
+
+/**
+ * The relative luminance of a computed colour, `rgb(...)` or `color(srgb ...)` (what color-mix() computes to).
+ * @param {string} css
+ * @returns {number} 0 (black) to 1 (white)
+ */
+function luminance(css) {
+  const n = (css.match(/[\d.]+/g) || []).map(Number);
+  const c = (css.startsWith('color(') ? n.slice(0, 3) : n.slice(0, 3).map((v) => v / 255))
+    .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+  return c.length === 3 ? 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2] : 1;
+}
+
+/**
+ * Gives each element black or white text, whichever reads better on its background: boxes are filled with the full
+ * kind or priority colour, light for some and dark for others, and differently in each theme. Black and white
+ * meet each other at a luminance of 0.179, where either has 4.58:1, so the better one always passes WCAG AA.
+ * @param {Array<HTMLElement>} els elements with the same classes (theirs and their parent's: a group's header takes
+ *   its colour from the group) share one answer, so it's worked out once each
+ */
+function setInk(els) {
+  const ink = new Map();
+  for (const e of els) {
+    const key = `${e.className}|${e.parentElement?.className}`;
+    if (!ink.has(key)) ink.set(key, luminance(getComputedStyle(e).backgroundColor) > 0.179 ? 'ink-dark' : 'ink-light');
+    e.classList.add(ink.get(key));
+  }
+}
+
+const EXPLORE_COLUMNS = [
+  { label: 'Record', cell: (r) => el('td', {}, recordLink(r)), sort: (r) => r.ref },
+  // Titles are cut to the column with an ellipsis; the whole title shows on hover, and is the link's name.
+  { label: 'Title', cell: (r) => el('td', { class: 'clip' }, el('a', { href: safeUrl(r.url), target: '_blank', rel: 'noopener', title: r.name, text: r.name })),
+    sort: (r) => r.name },
+  { label: 'Status', cell: (r) => el('td', { class: 'nowrap', text: r.status }), sort: (r) => r.status },
+  { label: 'Priority', cell: (r) => el('td', { class: 'nowrap', text: r.priority_name }), sort: (r) => r.priority },
+  { label: 'Updated', cell: (r) => el('td', { class: 'nowrap', text: r.updated || r.date }), sort: (r) => r.updated || r.date },
+];
+
+/**
+ * Fetches every record for the explorer, once per refresh, then draws it. A failure says so in the explorer's
+ * own alert (the page banner shows the snapshot's state) and keeps the last records on screen.
+ */
+async function loadExplorer() {
+  if (!snap || explorerAsked === snap.refreshed_at || (explorerData && explorerData.refreshed_at >= snap.refreshed_at)) return;
+  explorerAsked = snap.refreshed_at;
+  const err = document.getElementById('explore-error');
+  try {
+    const res = await fetch('api/explorer', { cache: 'no-store' });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+    explorerData = body;
+    err.hidden = true;
+  } catch (e) {
+    // explorerAsked stays set, so the redraw below doesn't ask again at once; load() clears it, so the next poll does.
+    err.hidden = false;
+    err.textContent = `Could not load the records for the explorer: ${e.message}${explorerData ? ' - showing the last ones read.' : ''}`;
+  }
+  renderExplorer();
+}
+
+/** Sets the explorer's controls to `exploreView`; a grouping already used above can't be picked again. */
+function syncExploreForm() {
+  [1, 2, 3].forEach((i) => {
+    const select = document.getElementById('explore-tier-' + i);
+    select.value = exploreView.tiers[i - 1] || '';
+    for (const o of select.options) o.disabled = Boolean(o.value) && exploreView.tiers.slice(0, i - 1).includes(o.value);
+  });
+  document.getElementById('explore-colour').value = exploreView.colour;
+  document.getElementById('explore-closed').checked = exploreView.closed;
+}
+
+/**
+ * Shows a new explorer view: remembers its groupings and colour, and puts it in the hash while the tab shows, so
+ * the link can be shared. Picking a box is a link instead, so Back goes back through what was picked.
+ */
+function setExplore(v) {
+  exploreView = v;
+  try { localStorage.setItem('explore', exploreHash({ ...v, zoom: [], sel: [] })); } catch { /* storage blocked: not kept */ }
+  if (!document.getElementById('panel-explorer').hidden) history.replaceState(null, '', exploreHash(v));
+  renderExplorer();
+}
+
+/**
+ * Draws the explorer from `explorerData` and `exploreView`: the treemap, the list of the picked box's records,
+ * the zoom path and the table of groups. Skipped when nothing changed, or while the tab is hidden.
+ */
+function renderExplorer() {
+  syncExploreForm();
+  const box = document.getElementById('treemap');
+  if (document.getElementById('panel-explorer').hidden) return;
+  loadExplorer();
+  if (!explorerData) {
+    if (!box.childElementCount) box.append(el('p', { class: 'empty', text: 'Loading records…' }));
+    return;
+  }
+  const v = exploreView;
+  const drawn = JSON.stringify([explorerData.refreshed_at, exploreHash(v), box.clientWidth, box.clientHeight]);
+  if (drawn === explorerDrawn) return;
+  explorerDrawn = drawn;
+
+  // The colour is the innermost grouping when it isn't already one, so every smallest box has a single colour.
+  const dims = [...v.tiers];
+  if (v.colour !== 'none' && !dims.includes(v.colour)) dims.push(v.colour);
+  const colourAt = dims.indexOf(v.colour);
+  const colourCls = (n) => (colourAt >= 0 && n.path.length > colourAt ? DIMS[v.colour].cls(n.records[0]) : '');
+  const tree = groupTree(v.closed ? explorerData.records : explorerData.records.filter((r) => r.open), dims);
+  const root = findGroup(tree, v.zoom) || tree;
+  const inRoot = v.sel.length >= root.path.length && samePath(v.sel.slice(0, root.path.length), root.path);
+  const sel = (inRoot && findGroup(tree, v.sel)) || root;
+  const total = root.records.length;
+  const share = (n) => `${total ? Math.round((n.records.length * 1000) / total) / 10 : 0}%`;
+  const href = (path) => exploreHash({ ...v, sel: path });
+  const zoomHref = (path) => exploreHash({ ...v, zoom: path, sel: [] });
+
+  // The treemap: boxes are links, absolutely placed side by side (never nested, so no link holds another); a group
+  // comes before its children, which sit on top of it.
+  const focused = box.contains(document.activeElement) ? document.activeElement.dataset.path : null;
+  const caption = document.getElementById('treemap-caption');
+  const show = (n) => {
+    caption.textContent = n ? `${pathText(n.path)}: ${recordsText(n.records.length)}, ${share(n)} of ${total}`
+      : 'Pick a box to list its records; double-click a group to zoom into it.';
+  };
+  const items = [];
+  const link = (n, cls, x, y, w, h, label) => {
+    const c = colourCls(n);
+    const a = el('a', { class: cls + (c ? ' ' + c : ''), href: href(n.path), 'data-path': JSON.stringify(n.path),
+      'aria-label': `${pathText(n.path)}: ${recordsText(n.records.length)} - show list` },
+    label ? el('span', { class: 'tm-label' }, el('span', { class: 'tm-name', text: n.label }),
+      el('span', { class: 'tm-n', text: String(n.records.length) })) : null);
+    Object.assign(a.style, { left: `${x}px`, top: `${y}px`, width: `${w}px`, height: `${h}px` });
+    if (n === sel && sel !== root) a.setAttribute('aria-current', 'true');
+    for (const [type, shown] of [['pointerenter', n], ['focus', n], ['pointerleave', null], ['blur', null]]) {
+      a.addEventListener(type, () => show(shown));
+    }
+    items.push(a);
+    return a;
+  };
+  const place = (n, x, y, w, h) => {
+    const top = n === root;
+    const pad = top ? 0 : TM.pad;
+    const head = !top && w >= TM.headW && h >= 2 * TM.head ? TM.head : 0;
+    const iw = w - 2 * pad, ih = h - head - 2 * pad;
+    if (!n.children.length || iw < TM.inner || ih < TM.inner) {
+      link(n, 'tm-leaf', x, y, w, h, w >= TM.labelW && h >= TM.labelH);
+      return;
+    }
+    if (!top) {
+      link(n, 'tm-group', x, y, w, h, head > 0).addEventListener('dblclick', (e) => {
+        e.preventDefault();
+        location.hash = zoomHref(n.path);
+      });
+    }
+    const rects = squarify(n.children.map((c) => c.size), x + pad, y + head + pad, iw, ih);
+    n.children.forEach((c, i) => place(c, rects[i].x, rects[i].y, rects[i].w, rects[i].h));
+  };
+  if (total) place(root, 0, 0, box.clientWidth, box.clientHeight);
+  else items.push(el('p', { class: 'empty', text: v.closed ? 'No records.' : 'No open records.' }));
+  box.replaceChildren(...items);
+  setInk([...box.querySelectorAll('.tm-leaf, .tm-group > .tm-label')]);
+  if (focused) items.find((a) => a.dataset?.path === focused)?.focus();
+  document.getElementById('explore-note').hidden = !dims.includes('cis');
+  show(null);
+
+  // Zoomed in, the path back out: each group above is a link that zooms out to it.
+  const crumbs = document.getElementById('explore-crumbs');
+  crumbs.hidden = !root.path.length;
+  const steps = [el('a', { href: zoomHref([]), text: 'All records' })];
+  root.path.forEach((label, i) => {
+    steps.push(el('span', { class: 'sep', 'aria-hidden': 'true', text: ' › ' }));
+    steps.push(i === root.path.length - 1 ? el('span', { 'aria-current': 'location', text: label })
+      : el('a', { href: zoomHref(root.path.slice(0, i + 1)), text: label }));
+  });
+  crumbs.replaceChildren(...(root.path.length ? steps : []));
+
+  // The picked box's records, or everything shown when none is picked.
+  exploreSelPath = sel.path;
+  document.getElementById('explore-title').textContent = pathText(sel.path);
+  document.getElementById('explore-count').textContent =
+    `${recordsText(sel.records.length)}${v.closed ? '' : ' (open only)'} - each opens in GLPI`;
+  document.getElementById('explore-zoom').hidden = !(sel !== root && sel.children.length);
+  const key = 'explore:' + JSON.stringify([sel.path, v.closed]);
+  if (key !== exploreListKey) { views.delete(key); exploreListKey = key; }
+  grid(document.getElementById('explore-rows'), key, EXPLORE_COLUMNS, sel.records);
+
+  // The same groups and counts as a table: the legend, and the view for anyone not using the map.
+  const table = document.getElementById('explore-table');
+  (table.tHead || table.createTHead()).replaceChildren(el('tr', {}, el('th', { scope: 'col', text: 'Group' }),
+    el('th', { scope: 'col', class: 'n', text: 'Records' }), el('th', { scope: 'col', class: 'n', text: 'Share' })));
+  const rows = [];
+  const walk = (n, depth) => {
+    for (const c of n.children) {
+      const cls = colourCls(c);
+      const th = el('th', { scope: 'row' }, cls ? el('span', { class: 'swatch ' + cls, 'aria-hidden': 'true' }) : null, c.label);
+      th.style.paddingLeft = `${10 + 18 * depth}px`;
+      rows.push(el('tr', {}, th, el('td', { class: 'n' },
+        el('a', { href: href(c.path), 'aria-label': `${pathText(c.path)}: ${recordsText(c.records.length)} - show list`,
+          text: String(c.records.length) })),
+      el('td', { class: 'n', text: share(c) })));
+      walk(c, depth + 1);
+    }
+  };
+  walk(root, 0);
+  fill(table.tBodies[0], rows, 3);
+}
+
+{
+  const tierOptions = (none) => [...(none ? [el('option', { value: '', text: '(nothing)' })] : []),
+    ...Object.entries(DIMS).map(([k, d]) => el('option', { value: k, text: d.label }))];
+  document.getElementById('explore-tier-1').append(...tierOptions(false));
+  document.getElementById('explore-tier-2').append(...tierOptions(true));
+  document.getElementById('explore-tier-3').append(...tierOptions(true));
+  document.getElementById('explore-colour').append(...COLOURS.map((k) =>
+    el('option', { value: k, text: k === 'none' ? 'Nothing' : DIMS[k].label })));
+  const form = document.getElementById('explore-form');
+  form.addEventListener('submit', (e) => e.preventDefault());
+  form.addEventListener('change', () => {
+    // "(nothing)" ends the groupings there; one picked again lower down (the top one changed to it) is dropped.
+    const picked = [1, 2, 3].map((i) => document.getElementById('explore-tier-' + i).value);
+    const end = picked.indexOf('');
+    const tiers = [...new Set(end < 0 ? picked : picked.slice(0, end))];
+    const colour = document.getElementById('explore-colour').value;
+    // Only Include closed changed: stay on the same groups, if they're still there.
+    const same = tiers.join() === exploreView.tiers.join() && colour === exploreView.colour;
+    setExplore({ tiers, colour, closed: document.getElementById('explore-closed').checked,
+      zoom: same ? exploreView.zoom : [], sel: same ? exploreView.sel : [] });
+  });
+  document.getElementById('explore-zoom').addEventListener('click', () => {
+    location.hash = exploreHash({ ...exploreView, zoom: exploreSelPath, sel: [] });
+  });
+  // Drawn to fit: a new size (the tab shown, the window resized) lays it out again.
+  new ResizeObserver(() => requestAnimationFrame(renderExplorer)).observe(document.getElementById('treemap'));
+  // The box colours, and so the text on them, change with the theme.
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { explorerDrawn = null; renderExplorer(); });
+}
+
 // --- page -------------------------------------------------------------------------------------------------------
 
 /** Draws every section from `snap`, then reopens the list in the URL hash, if any. */
@@ -473,6 +849,7 @@ function render() {
     el('div', { class: 'flight-group' + kindClass(g.kind) }, el('h3', { text: g.title }), el('div', { class: 'tiles' }, ...g.tiles.map(tile)))));
 
   renderRisks();
+  renderExplorer();
 
   showList();
 }
@@ -656,6 +1033,7 @@ async function load(refresh = false) {
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
     snap = body;
+    explorerAsked = null;     // the explorer may ask again: once per poll if it failed, else only for a new refresh
     render();
     return null;
   } catch (e) {
@@ -684,6 +1062,14 @@ function selectTab(tab, focus = false) {
   }
   if (focus) tab.focus();
   try { localStorage.setItem('tab', tab.id); } catch { /* storage blocked: the choice just isn't kept */ }
+  // The explorer's view lives in the hash while it shows, so the address can be shared; other tabs don't keep it.
+  // A #list= or #search= link is left alone: it opens over whichever tab shows.
+  if (tab.id === 'tab-explorer') {
+    if (location.hash.length <= 1) history.replaceState(null, '', exploreHash(exploreView));
+    renderExplorer();
+  } else if (parseExplore(location.hash)) {
+    history.replaceState(null, '', location.pathname + location.search);
+  }
 }
 
 TABS.forEach((t, i) => {
@@ -697,7 +1083,18 @@ TABS.forEach((t, i) => {
 });
 let savedTab = null;
 try { savedTab = localStorage.getItem('tab'); } catch { savedTab = null; }
-selectTab(TABS.find((t) => t.id === savedTab) || TABS[0]);
+const explorerTab = document.getElementById('tab-explorer');
+const linkedView = parseExplore(location.hash);
+if (linkedView) exploreView = linkedView;
+selectTab(linkedView ? explorerTab : TABS.find((t) => t.id === savedTab) || TABS[0]);
+// An explorer link (a box picked, Back, a shared address) shows the explorer at that view.
+window.addEventListener('hashchange', () => {
+  const v = parseExplore(location.hash);
+  if (!v) return;
+  exploreView = v;
+  if (explorerTab.getAttribute('aria-selected') === 'true') renderExplorer();
+  else selectTab(explorerTab);
+});
 
 // Escape hides a showing tooltip without moving the pointer (WCAG 1.4.13); it can show again once the pointer
 // or focus leaves that tile.

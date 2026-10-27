@@ -38,6 +38,9 @@
   --ph4: #b52f2f;
   --ph5: #8f2020;
   --ph6: #661414;
+  /* Text on the explorer's filled boxes, the same in both themes: the page picks whichever reads better on each. */
+  --ink-dark: #000;
+  --ink-light: #fff;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -270,6 +273,58 @@ table.grid { width: 100%; border-collapse: collapse; background: var(--surface-1
 .risk-table .count { font-size: 1.15rem; }
 .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 6px; background: var(--km, var(--k));
           vertical-align: -1px; }
+
+/* Record explorer: the treemap beside the list of the picked box's records; below it on narrow screens. Only this
+   panel grows past the page's 1200px, to 90% of a wider window: equal negative margins widen it about its centre. */
+#panel-explorer { margin-inline: min(0px, calc((100% - 90vw) / 2)); }
+.explore-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 12px; }
+.explore-tools > label:not(.check) { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary);
+                                     font-size: 0.85rem; }
+.explore-tools select { font: inherit; font-size: 0.85rem; padding: 3px 6px; color: var(--text-primary);
+                        background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px; }
+.explore-tools select:hover { border-color: var(--focus); }
+.explore-tools select:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+#explore-error { max-width: none; margin: 0 0 12px; }
+.explorer { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 16px; align-items: start; }
+@media (max-width: 900px) { .explorer { grid-template-columns: minmax(0, 1fr); } }
+.treemap-box { margin: 0; min-width: 0; }
+.crumbs { margin: 0 0 6px; font-size: 0.85rem; color: var(--text-secondary); }
+.crumbs [aria-current] { color: var(--text-primary); font-weight: 600; }
+.treemap { position: relative; height: clamp(320px, 62vh, 760px); overflow: hidden; background: var(--surface-1);
+           border: 1px solid var(--border); border-radius: 8px; }
+.treemap .empty { margin: 0; }
+/* Boxes are links placed side by side, a group under its children. A box is filled with its --k (record kind,
+   priority or open/closed), or a neutral without one; a group's header is a solid band, so it reads as a label,
+   not a border. The page gives each fill black or white text (.ink-*), whichever passes 4.5:1 on it. */
+.treemap a { position: absolute; display: block; overflow: hidden; color: var(--text-primary); text-decoration: none;
+             font-size: 0.75rem; line-height: 1.2; }
+.tm-group { background: color-mix(in srgb, var(--km, var(--k, var(--text-secondary))) 12%, var(--surface-1));
+            border: 1px solid var(--border); }
+.tm-leaf { background: var(--km, var(--k, var(--border))); border: 1px solid var(--surface-1); }
+.tm-label { display: flex; gap: 4px; padding: 1px 4px; white-space: nowrap; }
+.tm-name { overflow: hidden; text-overflow: ellipsis; }
+/* Mixed towards the text colour (darker in light, lighter in dark), so it stands out from boxes of its own colour. */
+.tm-group > .tm-label { height: 18px; align-items: center; font-weight: 600;
+                        background: color-mix(in srgb, var(--km, var(--k, var(--text-secondary))) 65%, var(--text-primary)); }
+.treemap .ink-dark { color: var(--ink-dark); }
+.treemap .ink-light { color: var(--ink-light); }
+.tm-n { font-weight: 600; font-variant-numeric: tabular-nums; }
+.treemap a:hover { box-shadow: inset 0 0 0 2px var(--focus); }
+.treemap a[aria-current="true"] { box-shadow: inset 0 0 0 3px var(--text-primary); }
+.treemap a:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; z-index: 1; }
+.state-open { --k: var(--focus); }
+.state-closed { --k: var(--text-secondary); }
+.explore-list { min-width: 0; }
+.explore-list h3 { margin: 0 0 2px; color: var(--text-primary); font-size: 1rem; }
+.explore-list .meta { margin: 0 0 8px; }
+/* The title takes what's left of the row and is cut with an ellipsis, so each record stays on one line. */
+.grid td.clip { width: 100%; max-width: 0; min-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.explore-actions { margin: 0 0 8px; }
+.explore-actions:has(> [hidden]:only-child) { display: none; }
+.explore-table { margin-top: 16px; }
+.explore-table summary { cursor: pointer; color: var(--link); font-size: 0.9rem; margin-bottom: 8px; }
+.explore-table summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.explore-table tbody th { color: var(--text-primary); font-weight: 400; font-size: 0.9rem; }
 
 dialog { width: min(1100px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 16px 18px;
          border: 1px solid var(--border); border-radius: 10px; background: var(--surface-0); color: var(--text-primary); }

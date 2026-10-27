@@ -11,7 +11,7 @@ requirements is trivial and a better solution right now than me adding customisa
 
 ## What it shows
 
-The page has five tabs. The browser remembers the last one you chose.
+The page has six tabs. The browser remembers the last one you chose.
 
 - **Summary**: open incidents, requests, problems and changes, and High-priority records.
   - **Record quality**: open records missing something the GLPI working rules ask for. That's no category;
@@ -40,6 +40,24 @@ The page has five tabs. The browser remembers the last one you chose.
   on a problem; the table's All / All opens every one. The weights are `RISK_*` in `app/model.py`, and the
   "Why" column shows each record's breakdown, so they're easy to tune. The table names every priority, so
   colour is never the only cue: six traffic-light steps can't all stay distinct for colour-blind readers.
+- **Record explorer**: every ticket, problem and change as a treemap, boxes within boxes in the manner of
+  WinDirStat, each box sized by its number of records. **Group by** and up to two **then by**s pick the
+  nesting from record type, priority, area, category, status, open or closed, assigned or not, has a CI or
+  not, **Linked CI** (a box per CI; a record linked to several is in each of their boxes, which the page
+  notes), **Linked records** (a family of records joined by problem-incident and change-problem links, named
+  after its problem, or its change if it has none), when it was opened (last week, month, 3 months, year, or
+  longer ago) and the year it was opened. A grouping used above can't be picked again, and *(nothing)* ends
+  the nesting there. **Colour by** picks record type, priority or open/closed (or nothing), and splits the
+  innermost boxes by it when it isn't already a grouping, so every smallest box has one colour. Boxes are
+  filled with the full colour, each group's name is a darker (or, in the dark theme, lighter) band along
+  its top, and the text on each is black or white, whichever reads better. **Include closed** adds closed
+  records. The tab widens to 90% of a wide window, more than the others. Pick any box to list its records
+  beside the map (below it on a narrow screen), each opening in
+  GLPI, with long titles cut short (hover for the whole title); **Zoom in**, or a double-click on a group, fills the map with
+  that group, and the path above the map zooms back out. The view, and the box picked, are in the address
+  (`#explore=...`), so it can be shared, and Back steps back through the boxes picked; the browser remembers
+  the groupings and colour. *The same groups as a table* below the map holds every group and count as text,
+  for anyone not using the map. Every box has a name for screen readers and works from the keyboard.
 
 Each kind of record has its own colour, used the same way everywhere: incidents blue, requests teal, problems
 orange, changes green and projects violet. Tiles that flag an issue across kinds (High priority, and record
@@ -51,7 +69,8 @@ the only cue, and every colour meets WCAG AA contrast in both light and dark the
 it is dimmed: no fill, a dashed grey border and a grey number.
 
 **Every number is a link** (`#list=<key>`) to the list behind it, each entry opening in GLPI. The number is
-computed as the length of that list, so the two can't disagree. Lists can be bookmarked. Record lists show
+computed as the length of that list, so the two can't disagree. (The Record explorer's boxes are grouped in the
+page, each from the same records it lists, so they can't disagree either.) Lists can be bookmarked. Record lists show
 when each record was opened and last updated.
 
 Every table sorts by any column: click a header, and click again to reverse. Tables show 10 rows, with
@@ -79,7 +98,8 @@ reverse proxy), plus the CIs named in `INTERNET_FACING_EXTRA` (e.g. the firewall
 `app/main.py` (FastAPI) refreshes a snapshot from GLPI every `REFRESH_SECONDS` (300) in the background. It
 serves the snapshot at `/api/snapshot`, along with the static page (`app/static/`, no build step).
 Each refresh also keeps a search index in memory, and `/api/search?q=<words>` (with `&closed=true` for closed records too) searches that, so a search
-makes no GLPI requests and shows the data as of the last refresh.
+makes no GLPI requests and shows the data as of the last refresh. It also keeps every record, closed ones too,
+for the Record explorer at `/api/explorer`; the page asks for that only while the explorer shows, once per refresh.
 
 - **If GLPI is unreachable**, the last snapshot stays, with a banner.
 - **`/healthz`** fails once the data is three refreshes old.

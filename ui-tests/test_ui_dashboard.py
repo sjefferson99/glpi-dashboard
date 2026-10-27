@@ -313,7 +313,8 @@ def test_only_http_links_are_followed(page: Page, dashboard):
 def test_tabs_in_order_with_summary_first(page: Page, dashboard):
     open_page(page)
     tabs = page.get_by_role("tab")
-    expect(tabs).to_have_text(["Summary", "In flight", "Recurring changes", "CMDB", "Risk analysis"])
+    expect(tabs).to_have_text(["Summary", "In flight", "Recurring changes", "CMDB", "Risk analysis",
+                                   "Record explorer"])
     expect(tabs.first).to_have_attribute("aria-selected", "true")
     expect(page.get_by_role("tabpanel")).to_have_count(1)     # hidden panels aren't exposed
     expect(page.get_by_role("tabpanel")).to_contain_text("Health at a glance")
@@ -337,11 +338,11 @@ def test_tabs_work_from_the_keyboard(page: Page, dashboard):
     expect(page.locator("#panel-flight")).to_be_visible()
     page.keyboard.press("ArrowLeft")
     page.keyboard.press("ArrowLeft")                       # wraps round to the last tab
-    expect(page.get_by_role("tab", name="Risk analysis")).to_be_focused()
+    expect(page.get_by_role("tab", name="Record explorer")).to_be_focused()
     page.keyboard.press("Home")
     expect(page.get_by_role("tab", name="Summary")).to_be_focused()
     page.keyboard.press("End")
-    expect(page.locator("#panel-risks")).to_be_visible()
+    expect(page.locator("#panel-explorer")).to_be_visible()
     # Only the selected tab is in the Tab order.
     expect(page.locator("[role=tab][tabindex='0']")).to_have_count(1)
 

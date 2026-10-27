@@ -45,7 +45,7 @@ ITIL = ("Ticket", "Problem", "Change", "ITILCategory", "Item_Ticket", "Item_Prob
 # The Refresh now button re-reads GLPI at most this often; quicker clicks get the current snapshot.
 MANUAL_MIN_SECONDS = 30
 
-state = {"snapshot": None, "search": None, "error": None, "refreshed_at": None}
+state = {"snapshot": None, "search": None, "explorer": None, "error": None, "refreshed_at": None}
 refresh_lock = asyncio.Lock()
 
 
@@ -95,14 +95,15 @@ async def collect(glpi):
 
 
 async def refresh(glpi):
-    """Rebuilds the snapshot and the search index from GLPI and clears any recorded error."""
+    """Rebuilds the snapshot, the search index and the explorer's records from GLPI and clears any recorded error."""
     data = await collect(glpi)
     now = datetime.now()
     builder = model.Builder(data, now, GLPI_PUBLIC_URL, INTERNET_ROOTS, INTERNET_EXTRA)
     snapshot = builder.build()
     index = builder.search_index()
-    # Both are built before either is published, so a failure leaves the last pair (and its time) together.
-    state["snapshot"], state["search"] = snapshot, index
+    explorer = builder.explorer()
+    # All are built before any is published, so a failure leaves the last set (and its time) together.
+    state["snapshot"], state["search"], state["explorer"] = snapshot, index, explorer
     state["refreshed_at"] = now
     state["error"] = None
     log.info("refreshed: %d records", len(state["snapshot"]["records"]))
@@ -161,10 +162,13 @@ async def security_headers(request, call_next):
 
 @app.get("/api/snapshot")
 async def snapshot():
-    """Returns the current snapshot, or 503 before the first successful refresh."""
+    """Returns the current snapshot, or 503 before the first successful refresh.
+
+    ``refreshed_at`` has milliseconds: the page compares it to tell refreshes apart, and two can fall in one second.
+    """
     if state["snapshot"] is None:
         return JSONResponse({"error": state["error"] or "first refresh still running"}, status_code=503)
-    return {**state["snapshot"], "refreshed_at": state["refreshed_at"].isoformat(timespec="seconds"),
+    return {**state["snapshot"], "refreshed_at": state["refreshed_at"].isoformat(timespec="milliseconds"),
             "refresh_seconds": REFRESH_SECONDS, "error": state["error"]}
 
 
@@ -192,6 +196,18 @@ def search(q: str = Query("", max_length=model.SEARCH_MAX), closed: bool = False
     if state["search"] is None:
         return JSONResponse({"error": state["error"] or "first refresh still running"}, status_code=503)
     return model.search(state["search"], q, closed)
+
+
+@app.get("/api/explorer")
+async def explorer():
+    """Returns every record, closed too, as of the last refresh, for the Record explorer; 503 before the first.
+
+    It's apart from the snapshot because it holds the whole history: the page asks for it only while the
+    explorer is showing, and again only when ``refreshed_at`` moves on.
+    """
+    if state["explorer"] is None:
+        return JSONResponse({"error": state["error"] or "first refresh still running"}, status_code=503)
+    return {"refreshed_at": state["refreshed_at"].isoformat(timespec="milliseconds"), "records": state["explorer"]}
 
 
 @app.get("/healthz")
