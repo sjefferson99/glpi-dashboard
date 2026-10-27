@@ -45,6 +45,13 @@ That belongs in the issue and the PR.
   the PR body laid out as step 1 / step 2 / …. If steps really are independent, give each its own PR
   **targeted at `main`**, never at another PR's branch. GitHub auto-deletes a merged head branch and silently
   closes any PR based on it.
+- **The user reviews on local Docker before anything is committed.** Once a change passes both test
+  suites, rebuild and restart the local container yourself
+  (`docker compose -f compose.yml -f compose.dev.yml up -d --build`). Check that `docker compose logs`
+  shows `refreshed: N records` and no `failed` or `cannot read`, then tell the user it's ready at
+  `http://127.0.0.1:8000`. Do this after every round of changes. The user tries it against their real GLPI
+  and fine-tunes with you. Ask to commit only after they're happy with it. The local `.env` points
+  `GLPI_URL` at GLPI's public address. Don't read or edit `.env`.
 - **A Claude code review before every merge.** Run `/code-review` on the PR as **one sequential pass with no
   sub-agents**. Reproduce each finding against a crafted input before reporting it. Post the findings as PR
   comments (labelled as below), then stop. Fixes wait for the user's approval, even obvious ones. Re-run the
