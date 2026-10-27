@@ -383,3 +383,60 @@ def test_marks_and_ci_chips_meet_wcag_aa(page: Page, dashboard, scheme):
     chip = page.locator("#list-rows .chip", has_text="Computer #1")
     colours = chip.evaluate("e => [getComputedStyle(e).color, getComputedStyle(e).backgroundColor]")
     assert _contrast(colours[0], colours[1]) >= 4.5
+
+
+# --- review fixes -------------------------------------------------------------------------------------------------
+
+def test_a_slow_search_never_draws_over_a_list_opened_after_it(page: Page, dashboard):
+    open_page(page)
+    held = []
+    page.route("**/api/search*", lambda route: held.append(route))
+    box(page).fill("db1")
+    box(page).press("Enter")
+    expect(dialog(page)).to_be_visible()
+    expect(page.locator("#list-count")).to_have_text("Searching…")
+    page.keyboard.press("Escape")
+    page.get_by_role("link", name=re.compile(r"^Open incidents: \d+$")).click()
+    expect(page.locator("#list-title")).to_have_text("Open incidents")
+    held[0].continue_()
+    page.wait_for_timeout(500)
+    expect(page.locator("#list-count")).to_have_text("3 records - each opens in GLPI")
+    expect(dialog(page).locator("thead th").last).to_have_text(re.compile("^CIs"))
+
+
+def test_a_failed_search_clears_the_last_results(page: Page, dashboard):
+    open_page(page)
+    search(page, "backup")
+    assert refs_shown(page) == ["Incident #2"]
+    page.route("**/api/search*", lambda route: route.fulfill(status=503, json={"error": "down"}))
+    page.locator("#list-search").fill("certificate")
+    page.keyboard.press("Enter")
+    expect(page.locator("#list-count")).to_have_text("Search failed: down")
+    expect(results(page)).to_have_text(["None"])
+
+
+def test_a_long_search_link_is_cut_to_fit(page: Page, dashboard):
+    open_page(page, "/#search=" + "a" * 120)
+    expect(page.locator("#list-count")).to_have_text("No matches.")
+    expect(page.locator("#list-search")).to_have_value("a" * 100)
+
+
+def test_a_word_inside_a_longer_one_still_marks_the_longer(page: Page, dashboard):
+    open_page(page, "/#search=db%20db1")
+    expect(page.locator("#list-count")).to_contain_text("match")
+    expect(results(page).first.get_by_role("link", name="db1 slow").locator("mark")).to_have_text(["db1"])
+
+
+def test_the_results_stay_put_as_they_grow_and_shrink(page: Page, dashboard):
+    page.set_viewport_size({"width": 1280, "height": 800})
+    open_page(page)
+    search(page, "certificate")
+    top = dialog(page).bounding_box()["y"]
+    assert top == 48
+    page.locator("#list-search").fill("")
+    expect(page.locator("#list-count")).to_have_text("Type at least 2 characters to search.")
+    assert dialog(page).bounding_box()["y"] == top
+    page.keyboard.press("Escape")
+    page.get_by_role("link", name=re.compile(r"^Open incidents: \d+$")).click()
+    expect(page.locator("#list-title")).to_have_text("Open incidents")
+    assert dialog(page).bounding_box()["y"] > top          # ordinary lists stay centred

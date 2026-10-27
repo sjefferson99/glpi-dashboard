@@ -1,4 +1,6 @@
 """Search: the index built at refresh, model.search() over it, and GET /api/search."""
+import inspect
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -208,3 +210,45 @@ def test_search_has_the_security_headers(client):
     r = client.get("/api/search", params={"q": "db1"})
     assert r.headers["Content-Security-Policy"].startswith("default-src 'self'")
     assert r.headers["Cache-Control"] == "no-store"
+
+
+# --- review fixes -------------------------------------------------------------------------------------------
+
+def test_matching_and_snippets_agree_on_case(idx):
+    data = model_input()
+    data["Ticket"][1]["content"] = "Straße 5 cabling"
+    ix = index(data)
+    # casefold() would match "strasse" here, with no snippet to show why.
+    assert model.search(ix, "strasse")["total"] == 0
+    hit = model.search(ix, "STRAßE")["results"][0]
+    assert hit["ref"] == "Incident #2" and hit["snippet"] == "Straße 5 cabling"
+
+
+def test_a_failed_index_build_keeps_the_last_snapshot_and_index_together(client, fake, monkeypatch):
+    monkeypatch.setattr(main, "MANUAL_MIN_SECONDS", 0)
+    before = client.get("/api/snapshot").json()
+    fake.data["Ticket"][1]["name"] = "Renamed ticket"
+
+    def boom(self):
+        raise KeyError("id")
+    monkeypatch.setattr(model.Builder, "search_index", boom)
+    after = client.post("/api/refresh").json()
+    assert after["error"] == "KeyError building the dashboard (see container log)"
+    assert after["refreshed_at"] == before["refreshed_at"]
+    assert after["records"] == before["records"]
+    assert refs(client.get("/api/search", params={"q": "db1 slow"}).json()) == ["Incident #2"]
+
+
+def test_search_runs_off_the_event_loop():
+    # A plain def runs in FastAPI's threadpool, so a long scan doesn't hold up /healthz or the refresh loop.
+    assert not inspect.iscoroutinefunction(main.search)
+
+
+@pytest.mark.parametrize("text", [None, "", "<p>&nbsp;</p>", "&lt;p&gt;&amp;nbsp;&lt;/p&gt;", "<p> </p>\n"])
+def test_blank_fields_are_blank(text):
+    assert model._blank(text)
+
+
+@pytest.mark.parametrize("text", ["<p>Written</p>", "&lt;p&gt;x&lt;/p&gt;", "0"])
+def test_written_fields_are_not_blank(text):
+    assert not model._blank(text)

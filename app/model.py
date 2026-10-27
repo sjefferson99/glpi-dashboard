@@ -61,20 +61,19 @@ def _date(s):
     return datetime.fromisoformat(s.replace(" ", "T")) if s else None
 
 
-def _blank(html_text):
-    """Says whether a GLPI rich-text field has no visible text.
+def _plain(html_text):
+    """Returns a GLPI rich-text field as one line of plain text.
 
     GLPI may return the HTML entity-encoded (``&lt;p&gt;``), so it's decoded before and after
     the tags are dropped; an empty editor leaves ``<p>&nbsp;</p>``.
     """
-    text = TAG.sub("", html.unescape(html_text or ""))
-    return not html.unescape(text).replace("\xa0", " ").strip()
-
-
-def _plain(html_text):
-    """Returns a GLPI rich-text field as one line of plain text, decoded as ``_blank()`` does."""
     text = TAG.sub(" ", html.unescape(html_text or ""))
     return SPACE.sub(" ", html.unescape(text).replace("\xa0", " ")).strip()
+
+
+def _blank(html_text):
+    """Says whether a GLPI rich-text field has no visible text."""
+    return not _plain(html_text)
 
 
 def _snippet(text, terms):
@@ -519,12 +518,12 @@ class Builder:
         record or in the impact graph.
 
         Returns:
-            Entries as ``search()`` shows them, each with ``_hay``, the case-folded text searched; ``_text``, the
+            Entries as ``search()`` shows them, each with ``_hay``, the lower-cased text searched; ``_text``, the
             description as plain text, for snippets; and ``_tag``, its ``#id``, which ranks an exact id first.
         """
         def entry(fields, text, *more):
             hay = " ".join([fields["ref"], fields["name"], fields["category"], fields["status"], *more, text])
-            return {**fields, "_hay": hay.casefold(), "_text": text, "_tag": "#" + fields["ref"].rsplit("#", 1)[-1]}
+            return {**fields, "_hay": hay.lower(), "_text": text, "_tag": "#" + fields["ref"].rsplit("#", 1)[-1]}
 
         out = []
         for r in self.records.values():
@@ -569,16 +568,18 @@ def search(index, query, closed=False, limit=SEARCH_LIMIT):
         ``query``, the ``total`` number of matches, and the first ``limit`` of them as ``results``. A result
         whose title lacks a word has a ``snippet`` of its description around the first word found there.
     """
-    terms = query.casefold().split()
+    # lower(), not casefold(): the snippet (re.IGNORECASE) and the page's highlighting (toLowerCase) match the same
+    # way, so a hit always comes back with its words shown. casefold() would match "strasse" to "Straße" unseen.
+    terms = query.lower().split()
     if len(query.strip()) < SEARCH_MIN:
         return {"query": query, "total": 0, "results": []}
     hits = [e for e in index if (closed or e["open"] is not False) and all(t in e["_hay"] for t in terms)]
     hits.sort(key=lambda e: e["updated"] or e["date"] or "", reverse=True)
-    hits.sort(key=lambda e: (e["_tag"] not in terms, not all(t in e["name"].casefold() for t in terms),
+    hits.sort(key=lambda e: (e["_tag"] not in terms, not all(t in e["name"].lower() for t in terms),
                              e["open"] is False))
     results = []
     for e in hits[:limit]:
-        missing = [t for t in terms if t not in e["name"].casefold()]
+        missing = [t for t in terms if t not in e["name"].lower()]
         results.append({**{f: v for f, v in e.items() if not f.startswith("_")},
                         "snippet": _snippet(e["_text"], missing) if missing else ""})
     return {"query": query, "total": len(hits), "results": results}

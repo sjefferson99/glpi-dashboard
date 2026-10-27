@@ -158,7 +158,9 @@ const RISK_COLUMNS = [
 function marked(text, words) {
   const frag = document.createDocumentFragment();
   if (!words.length) { frag.append(text); return frag; }
-  const re = new RegExp(words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'gi');
+  // Longest first: the regex takes the first alternative that matches, so `db` would hide `db1`.
+  const longest = [...words].sort((a, b) => b.length - a.length);
+  const re = new RegExp(longest.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'gi');
   let at = 0;
   for (const m of text.matchAll(re)) {
     frag.append(text.slice(at, m.index), el('mark', { text: m[0] }));
@@ -485,7 +487,8 @@ function showList() {
   if (s) {
     let q = null;
     try { q = decodeURIComponent(s[1]); } catch { q = null; }
-    if (q !== null) { showSearch(q, Boolean(s[2])); return; }
+    // The boxes stop at SEARCH_MAX characters and so does the server; a longer link is cut to fit.
+    if (q !== null) { showSearch(q.slice(0, SEARCH_MAX), Boolean(s[2])); return; }
   }
   setSearchMode(false);
   const m = location.hash.match(/^#list=(.+)$/);
@@ -508,6 +511,7 @@ function showList() {
 // --- search: the header box opens #search=<query> in the list dialog, which has its own box to refine it ---------
 
 const SEARCH_MIN = 2;
+const SEARCH_MAX = 100;
 const SEARCH_DELAY_MS = 500;
 const searchBox = document.getElementById('search');
 const listSearch = document.getElementById('list-search');
@@ -525,7 +529,10 @@ function setSearchMode(on) {
   document.getElementById('list-search-form').hidden = !on;
   document.getElementById('search-data').hidden = !on;
   document.getElementById('list').classList.toggle('searching', on);
-  if (!on) searchDrawn = null;
+  if (!on) {
+    searchDrawn = null;
+    ++searchSeq;      // a search still on its way must not draw over the list that replaced it
+  }
 }
 
 /** The hash for a search: `#search=<query>`, plus `&closed=1` to include closed records. */
@@ -590,6 +597,8 @@ async function showSearch(q, closed) {
   } catch (e) {
     if (seq !== searchSeq) return;
     searchDrawn = null;
+    searchWords = [];
+    grid(table, 'search', SEARCH_COLUMNS, []);     // not the last query's results under this one
     count.textContent = `Search failed: ${e.message}`;
   }
 }

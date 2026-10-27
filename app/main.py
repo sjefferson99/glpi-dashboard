@@ -99,8 +99,10 @@ async def refresh(glpi):
     data = await collect(glpi)
     now = datetime.now()
     builder = model.Builder(data, now, GLPI_PUBLIC_URL, INTERNET_ROOTS, INTERNET_EXTRA)
-    state["snapshot"] = builder.build()
-    state["search"] = builder.search_index()
+    snapshot = builder.build()
+    index = builder.search_index()
+    # Both are built before either is published, so a failure leaves the last pair (and its time) together.
+    state["snapshot"], state["search"] = snapshot, index
     state["refreshed_at"] = now
     state["error"] = None
     log.info("refreshed: %d records", len(state["snapshot"]["records"]))
@@ -180,10 +182,12 @@ async def manual_refresh():
 
 
 @app.get("/api/search")
-async def search(q: str = Query("", max_length=model.SEARCH_MAX), closed: bool = False):
+def search(q: str = Query("", max_length=model.SEARCH_MAX), closed: bool = False):
     """Searches what the last refresh read, closed records only if asked; 503 before the first refresh.
 
-    No GLPI requests are made, so a search costs GLPI nothing and shows the data as of that refresh.
+    No GLPI requests are made, so a search costs GLPI nothing and shows the data as of that refresh. It's a
+    plain ``def``, so FastAPI runs the scan in its threadpool rather than holding up the event loop; that's
+    safe because a refresh replaces the index whole, never changing one in use.
     """
     if state["search"] is None:
         return JSONResponse({"error": state["error"] or "first refresh still running"}, status_code=503)
