@@ -16,10 +16,28 @@
      10% tint, and the kind is always also written out, so colour is never the only cue. */
   --k-incident: #1d5fa8;
   --k-request: #0f6e7d;
-  --k-problem: #9f4c00;
+  --k-problem: #ab4c00;
+  /* Problem orange dark enough for text reads brown, so marks (edges, dots, chart segments) use a brighter one;
+     a mark only needs 3:1. */
+  --k-problem-mark: #e2660a;
   --k-change: #137034;
   --k-project: #6d28d9;
   --k-issue: #be123c;
+  /* Priority, Very low to Major, in the two colour styles the Risk analysis tab offers. Traffic light runs green
+     to red, darkening as it goes; six steps can't all stay apart for colour-blind readers, so the table names
+     every priority. Heat is one red, deeper for higher (validated as an ordinal ramp on the surface). */
+  --pt1: #7cc57a;
+  --pt2: #d6c93a;
+  --pt3: #f2a33a;
+  --pt4: #ea6a2a;
+  --pt5: #cc3329;
+  --pt6: #8a1919;
+  --ph1: #f09a9a;
+  --ph2: #e56b6b;
+  --ph3: #d64545;
+  --ph4: #b52f2f;
+  --ph5: #8f2020;
+  --ph6: #661414;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -34,10 +52,18 @@
     --banner-bg: #3a1a1a;
     --k-incident: #8ab4f8;
     --k-request: #5fd4d4;
-    --k-problem: #fbbf24;
+    --k-problem: #ff8b00;
+    --k-problem-mark: #ff8b00;
     --k-change: #6fcf97;
     --k-project: #c4a7ff;
     --k-issue: #fb7185;
+    --pt6: #b02020;
+    --ph1: #963030;
+    --ph2: #b53636;
+    --ph3: #d44848;
+    --ph4: #e86f6f;
+    --ph5: #f39c9c;
+    --ph6: #fbcaca;
   }
 }
 :root[data-theme="dark"] {
@@ -52,18 +78,39 @@
   --banner-bg: #3a1a1a;
   --k-incident: #8ab4f8;
   --k-request: #5fd4d4;
-  --k-problem: #fbbf24;
+  --k-problem: #ff8b00;
+  --k-problem-mark: #ff8b00;
   --k-change: #6fcf97;
   --k-project: #c4a7ff;
   --k-issue: #fb7185;
+  --pt6: #b02020;
+  --ph1: #963030;
+  --ph2: #b53636;
+  --ph3: #d44848;
+  --ph4: #e86f6f;
+  --ph5: #f39c9c;
+  --ph6: #fbcaca;
 }
 
 .kind-incident { --k: var(--k-incident); }
 .kind-request { --k: var(--k-request); }
-.kind-problem { --k: var(--k-problem); }
+.kind-problem { --k: var(--k-problem); --km: var(--k-problem-mark); }
 .kind-change { --k: var(--k-change); }
 .kind-project { --k: var(--k-project); }
 .kind-issue { --k: var(--k-issue); }
+.prio-1 { --k: var(--pt1); }
+.prio-2 { --k: var(--pt2); }
+.prio-3 { --k: var(--pt3); }
+.prio-4 { --k: var(--pt4); }
+.prio-5 { --k: var(--pt5); }
+.prio-6 { --k: var(--pt6); }
+.colours-heat .prio-1 { --k: var(--ph1); }
+.colours-heat .prio-2 { --k: var(--ph2); }
+.colours-heat .prio-3 { --k: var(--ph3); }
+.colours-heat .prio-4 { --k: var(--ph4); }
+.colours-heat .prio-5 { --k: var(--ph5); }
+.colours-heat .prio-6 { --k: var(--ph6); }
+.prio-none { --k: var(--border); }
 
 * { box-sizing: border-box; }
 body {
@@ -77,7 +124,10 @@ a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
 .top, main { max-width: 1200px; margin: 0 auto; padding: 0 16px; }
-.top { padding-top: 20px; }
+/* The title on the left; when it was updated and Refresh on the right, on the title's baseline. */
+.top { padding-top: 20px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end;
+       gap: 4px 16px; }
+.top .meta { margin: 0; font-size: 0.8rem; }
 h1 { font-size: 1.5rem; margin: 0; display: flex; align-items: center; gap: 10px; }
 .logo { width: 36px; height: 36px; padding: 2px; background: #fcfcfb; border-radius: 8px; }
 h2 { font-size: 1.15rem; margin: 28px 0 6px; }
@@ -88,15 +138,24 @@ h3 { font-size: 0.95rem; margin: 20px 0 6px; color: var(--text-secondary); }
 .btn:hover:not(:disabled) { border-color: var(--focus); }
 .btn:disabled { cursor: progress; color: var(--text-secondary); }
 .btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-#refresh { margin-left: 8px; }
+.icon-btn { display: inline-flex; vertical-align: middle; padding: 3px; margin-left: 4px; cursor: pointer; color: var(--text-secondary);
+            background: none; border: 1px solid transparent; border-radius: 6px; }
+.icon-btn:hover:not(:disabled) { color: var(--text-primary); border-color: var(--border); }
+.icon-btn:disabled { cursor: progress; }
+.icon-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.refresh-icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round;
+                stroke-linejoin: round; }
+.icon-btn:disabled .refresh-icon { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .icon-btn:disabled .refresh-icon { animation: none; } }
 .banner { max-width: 1168px; margin: 12px auto; padding: 10px 14px; border-radius: 6px;
           background: var(--banner-bg); border-left: 4px solid var(--critical); }
 
 /* Stat tiles: the number is the link to its list. */
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 .tile { display: block; background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
-        border-left: 4px solid var(--k, var(--border)); padding: 12px 14px; text-decoration: none; color: inherit; }
-.tile:hover { border-color: var(--focus); border-left-color: var(--k, var(--focus)); }
+        border-left: 4px solid var(--km, var(--k, var(--border))); padding: 12px 14px; text-decoration: none; color: inherit; }
+.tile:hover { border-color: var(--focus); border-left-color: var(--km, var(--k, var(--focus))); }
 .tile .value { display: block; font-size: 1.9rem; font-weight: 600; font-variant-numeric: tabular-nums;
                color: var(--k, var(--link)); line-height: 1.1; }
 .tile .label { display: block; color: var(--text-secondary); font-size: 0.85rem; margin-top: 4px; }
@@ -134,7 +193,7 @@ h3 { font-size: 0.95rem; margin: 20px 0 6px; color: var(--text-secondary); }
 .card .counts .value { font-size: 1.4rem; font-weight: 600; font-variant-numeric: tabular-nums; }
 .card .counts .label { color: var(--text-secondary); font-size: 0.8rem; margin-left: 4px; }
 .card-meta { margin: 6px 0 0; color: var(--text-secondary); font-size: 0.8rem; }
-.card[class*="kind-"] { border-left: 4px solid var(--k); }
+.card[class*="kind-"] { border-left: 4px solid var(--km, var(--k)); }
 
 /* A count of one kind of record, e.g. a CI's open problems; a zero is plain. */
 .count { color: var(--k); font-weight: 600; text-decoration: none; }
@@ -142,7 +201,7 @@ h3 { font-size: 0.95rem; margin: 20px 0 6px; color: var(--text-secondary); }
 .count.zero { color: var(--text-secondary); font-weight: 400; }
 
 .flight-group h3 { margin-top: 14px; display: flex; align-items: center; gap: 8px; color: var(--text-primary); }
-.flight-group h3::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--k); }
+.flight-group h3::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--km, var(--k)); }
 
 /* A record's reference, tinted by kind. */
 .chip { display: inline-block; padding: 0 6px; border-radius: 4px; color: var(--k); text-decoration: none;
@@ -179,6 +238,36 @@ table.grid { width: 100%; border-collapse: collapse; background: var(--surface-1
 .bar { display: inline-block; width: 90px; height: 6px; background: var(--border); border-radius: 3px;
        vertical-align: middle; margin-right: 6px; overflow: hidden; }
 .bar span { display: block; height: 100%; background: var(--k-project); border-radius: 3px; }
+
+/* Risks: the sunburst beside its table, the same height. Segments are links; a 2px surface stroke keeps
+   them apart. */
+.risk-tools { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-bottom: 12px; }
+.toggle { display: flex; align-items: center; gap: 4px; }
+.toggle-label { color: var(--text-secondary); font-size: 0.85rem; margin-right: 4px; }
+.toggle .btn[aria-pressed="true"] { border-color: var(--focus); font-weight: 600; box-shadow: inset 0 -2px 0 var(--focus); }
+.risks { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); gap: 16px;
+         align-items: stretch; max-width: 900px; }
+.risk-chart { margin: 0; padding: 12px 16px; display: flex; flex-direction: column; align-items: center;
+              background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; }
+.sunburst { display: block; width: 100%; max-width: 380px; height: auto; }
+.sunburst .seg { fill: var(--km, var(--k)); stroke: var(--surface-1); stroke-width: 2; transition: opacity 0.1s; }
+.sunburst:has(a:hover, a:focus-visible) .seg { opacity: 0.45; }
+.sunburst a:hover .seg, .sunburst a:focus-visible .seg { opacity: 1; }
+.sunburst a { outline: none; }
+.sunburst a:focus-visible .seg { stroke: var(--focus); stroke-width: 3; }
+.sunburst .centre-n { fill: var(--text-primary); font-size: 30px; font-weight: 600; text-anchor: middle;
+                      font-variant-numeric: tabular-nums; }
+.sunburst .centre-label { fill: var(--text-secondary); font-size: 11px; text-anchor: middle; }
+.risk-caption { margin: 8px 0 0; min-height: 1.4em; color: var(--text-secondary); font-size: 0.85rem; text-align: center; }
+/* The table fills the row's height, so its rows spread out to match the charts. */
+.risk-table-box { display: flex; }
+.risk-table { height: 100%; font-size: 1rem; }
+.risk-table td, .risk-table th { vertical-align: middle; }
+.risk-table tbody th, .risk-table tfoot th { color: var(--text-primary); font-weight: 500; white-space: nowrap; }
+.risk-table tfoot th, .risk-table tfoot td { font-weight: 600; }
+.risk-table .count { font-size: 1.15rem; }
+.swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 6px; background: var(--km, var(--k));
+          vertical-align: -1px; }
 
 dialog { width: min(1100px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 16px 18px;
          border: 1px solid var(--border); border-radius: 10px; background: var(--surface-0); color: var(--text-primary); }

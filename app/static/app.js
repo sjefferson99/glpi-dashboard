@@ -138,19 +138,21 @@ const CI_COLUMNS = [
   { label: 'Changes', num: true, cell: (c) => el('td', { class: 'n' }, countLink(c.changes_list, c.changes, 'change')), sort: (c) => c.changes },
 ];
 
+// Rows are records with `risk` (rank, score, why), in score order.
 const RISK_COLUMNS = [
-  { label: '#', num: true, cell: (s) => el('td', { class: 'n', text: String(s.rank) }), sort: (s) => s.rank },
-  { label: 'Record', cell: (s) => el('td', {}, recordLink(s.rec), ' ' + s.rec.name), sort: (s) => s.rec.ref },
-  { label: 'Priority', cell: (s) => el('td', { class: 'nowrap', text: s.rec.priority_name }), sort: (s) => s.rec.priority },
-  { label: 'Area', cell: (s) => el('td', { text: s.rec.area }), sort: (s) => s.rec.area },
-  { label: 'Opened', cell: (s) => el('td', { class: 'nowrap', text: s.rec.date }), sort: (s) => s.rec.date },
-  { label: 'Score', num: true, cell: (s) => el('td', { class: 'n', text: String(s.score) }), sort: (s) => s.score },
-  { label: 'Why', cell: (s) => el('td', { class: 'why', text: s.why.join(' · ') }) },
+  { label: '#', num: true, cell: (r) => el('td', { class: 'n', text: String(r.risk.rank) }), sort: (r) => r.risk.rank },
+  { label: 'Record', cell: (r) => el('td', {}, recordLink(r), ' ', glpiLink(r.url, r.name)), sort: (r) => r.ref },
+  { label: 'Priority', cell: (r) => el('td', { class: 'nowrap', text: r.priority_name }), sort: (r) => r.priority },
+  { label: 'Area', cell: (r) => el('td', { text: r.area }), sort: (r) => r.area },
+  { label: 'Opened', cell: (r) => el('td', { class: 'nowrap', text: r.date }), sort: (r) => r.date },
+  { label: 'Score', num: true, cell: (r) => el('td', { class: 'n', text: String(r.risk.score) }), sort: (r) => r.risk.score },
+  { label: 'Why', cell: (r) => el('td', { class: 'why', text: r.risk.why.join(' · ') }) },
 ];
 
 const LIST_KINDS = {
   records: { columns: RECORD_COLUMNS, noun: ['record', 'records'] },
   projects: { columns: PROJECT_COLUMNS, noun: ['project', 'projects'] },
+  risks: { columns: RISK_COLUMNS, noun: ['record', 'records'] },
 };
 
 // Sort column, direction and rows shown, by table id, so the 60 s re-render keeps them.
@@ -247,6 +249,154 @@ function draw(table) {
     el('span', { class: 'shown', text: `Showing ${Math.min(view.shown, rows.length)} of ${rows.length}` }), ...buttons)));
 }
 
+// --- risks: a sunburst (inner ring one grouping, outer ring split by the other) and the same counts as a table ---
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const RISK_KINDS = ['Problem', 'Change'];
+const RING = { size: 240, hole: 44, inner: 82, outer: 116 };
+// The chart's two toggles; each choice is remembered in localStorage as risk-<name>.
+const RISK_CHOICES = { inner: ['priority', 'kind'], colours: ['traffic', 'heat'] };
+const riskView = { inner: 'priority', colours: 'traffic' };
+for (const [name, values] of Object.entries(RISK_CHOICES)) {
+  try {
+    const saved = localStorage.getItem('risk-' + name);
+    if (values.includes(saved)) riskView[name] = saved;
+  } catch { /* storage blocked: the defaults */ }
+}
+// What the risks section last drew, so an unchanged re-render leaves it (and the focus in it) alone.
+let risksDrawn = null;
+
+/** Like el(), for SVG: `text` sets textContent; everything else, `class` included, is an attribute. */
+function svgEl(tag, attrs = {}, ...kids) {
+  const e = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'text') e.textContent = v;
+    else e.setAttribute(k, v);
+  }
+  for (const kid of kids) if (kid != null) e.append(kid);
+  return e;
+}
+
+/** The colour class for a priority (1-6, see --pt* and --ph* in style.css); any other value gets a neutral fill. */
+const prioClass = (p) => (Number.isInteger(p) && p >= 1 && p <= 6 ? 'prio-' + p : 'prio-none');
+
+/**
+ * The outline of one ring segment, clockwise from 12 o'clock.
+ * @param {number} r0 inner radius
+ * @param {number} r1 outer radius
+ * @param {number} a0 start, as a fraction of the circle
+ * @param {number} a1 end, as a fraction of the circle
+ * @returns {string} an SVG path; a whole ring is two circles, to be filled even-odd
+ */
+function ringPath(r0, r1, a0, a1) {
+  const c = RING.size / 2;
+  if (a1 - a0 >= 1 - 1e-9) {
+    const circle = (r) => `M${c - r},${c}A${r},${r} 0 1 1 ${c + r},${c}A${r},${r} 0 1 1 ${c - r},${c}Z`;
+    return circle(r1) + circle(r0);
+  }
+  const pt = (r, a) => {
+    const t = 2 * Math.PI * a - Math.PI / 2;
+    return `${(c + r * Math.cos(t)).toFixed(2)},${(c + r * Math.sin(t)).toFixed(2)}`;
+  };
+  const large = a1 - a0 > 0.5 ? 1 : 0;
+  return `M${pt(r1, a0)}A${r1},${r1} 0 ${large} 1 ${pt(r1, a1)}L${pt(r0, a1)}A${r0},${r0} 0 ${large} 0 ${pt(r0, a0)}Z`;
+}
+
+/**
+ * Draws the risks section: the sunburst with the chosen inner ring and colours, and the priority-by-kind table.
+ * Skipped when nothing changed, so the 60 s re-render doesn't take focus off a segment.
+ */
+function renderRisks() {
+  const risks = snap.risks;
+  for (const name of Object.keys(RISK_CHOICES)) {
+    for (const b of document.querySelectorAll(`[data-${name}]`)) b.setAttribute('aria-pressed', String(b.dataset[name] === riskView[name]));
+  }
+  const box = document.getElementById('risks');
+  box.classList.toggle('colours-heat', riskView.colours === 'heat');
+  const drawn = JSON.stringify([riskView.inner, risks]);
+  if (drawn === risksDrawn) return;
+  risksDrawn = drawn;
+  if (!risks.total) {
+    box.replaceChildren(el('p', { class: 'empty', text: 'No open risks.' }));
+    return;
+  }
+  const prioName = Object.fromEntries(risks.priorities.map((p) => [p.priority, p.name]));
+  const kindRank = (k) => RISK_KINDS.indexOf(k);
+  const kindCls = (k) => kindClass(k).trim();
+  const byPrio = riskView.inner === 'priority';
+  // Outer segments follow the inner ring's order, so each sits inside its own inner segment.
+  const inner = byPrio
+    ? risks.priorities.map((p) => ({ ...p, label: `${p.name} priority`, cls: prioClass(p.priority) }))
+    : risks.kinds.map((k) => ({ ...k, label: `${k.kind}s`, cls: kindCls(k.kind) }));
+  const outer = [...risks.cells]
+    .sort((a, b) => (byPrio ? b.priority - a.priority || kindRank(a.kind) - kindRank(b.kind)
+      : kindRank(a.kind) - kindRank(b.kind) || b.priority - a.priority))
+    .map((c) => ({ ...c, label: `${c.kind}s at ${prioName[c.priority]} priority`,
+      cls: byPrio ? kindCls(c.kind) : prioClass(c.priority) }));
+
+  /** The sunburst, as a <figure>: each segment links to its list, and the middle shows the total. */
+  const sunburst = () => {
+    const mid = RING.size / 2;
+    const centreN = svgEl('text', { class: 'centre-n', x: String(mid), y: String(mid + 4) });
+    const centreLabel = svgEl('text', { class: 'centre-label', x: String(mid), y: String(mid + 20) });
+    // Screen readers get the same from each segment's name, so this is for sighted users only.
+    const caption = el('p', { class: 'risk-caption', 'aria-hidden': 'true' });
+    /** Shows a segment's count in the middle and its name below, or the total when `seg` is null. */
+    const show = (seg) => {
+      centreN.textContent = String(seg ? seg.count : risks.total);
+      centreLabel.textContent = seg ? 'records' : 'open risks';
+      caption.textContent = seg ? `${seg.label}: ${seg.count} of ${risks.total}` : 'Pick a segment to list its records.';
+    };
+    /** One ring: each segment is a link to its list, sized by its share of the total. */
+    const ring = (segs, r0, r1) => {
+      let at = 0;
+      return segs.map((seg) => {
+        const a0 = at / risks.total;
+        at += seg.count;
+        const a = svgEl('a', { href: '#list=' + encodeURIComponent(seg.list), 'aria-label': `${seg.label}: ${seg.count} - show list` },
+          svgEl('path', { class: 'seg ' + seg.cls, d: ringPath(r0, r1, a0, at / risks.total), 'fill-rule': 'evenodd' }));
+        for (const [type, shown] of [['pointerenter', seg], ['focus', seg], ['pointerleave', null], ['blur', null]]) {
+          a.addEventListener(type, () => show(shown));
+        }
+        return a;
+      });
+    };
+    const svg = svgEl('svg', { class: 'sunburst', viewBox: `0 0 ${RING.size} ${RING.size}`, role: 'group',
+      'aria-label': `Risks by ${byPrio ? 'priority, then record type' : 'record type, then priority'}` },
+    ...ring(inner, RING.hole, RING.inner), ...ring(outer, RING.inner, RING.outer), centreN, centreLabel);
+    show(null);
+    return el('figure', { class: 'risk-chart' }, svg, caption);
+  };
+
+  // The table holds every count the chart does, as text: it's the legend and the non-visual view in one.
+  const swatch = (cls) => el('span', { class: 'swatch ' + cls, 'aria-hidden': 'true' });
+  const num = (g, kind) => el('td', { class: 'n' },
+    g ? countLink(g.list, g.count, kind) : el('span', { class: 'count zero', text: '0' }));
+  const cell = (p, kind) => risks.cells.find((c) => c.priority === p && c.kind === kind);
+  const table = el('table', { class: 'grid risk-table', 'aria-labelledby': 'h-risks' },
+    el('thead', {}, el('tr', {}, el('th', { scope: 'col', text: 'Priority' }),
+      ...RISK_KINDS.map((k) => el('th', { scope: 'col', class: 'n' }, swatch(kindCls(k)), `${k}s`)),
+      el('th', { scope: 'col', class: 'n', text: 'All' }))),
+    el('tbody', {}, ...risks.priorities.map((p) => el('tr', {},
+      el('th', { scope: 'row' }, swatch(prioClass(p.priority)), p.name),
+      ...RISK_KINDS.map((k) => num(cell(p.priority, k), k)),
+      el('td', { class: 'n' }, listLink(p.list, p.count, 'count'))))),
+    el('tfoot', {}, el('tr', {}, el('th', { scope: 'row', text: 'All' }),
+      ...RISK_KINDS.map((k) => num(risks.kinds.find((g) => g.kind === k), k)),
+      el('td', { class: 'n' }, listLink(risks.list, risks.total, 'count')))));
+  box.replaceChildren(sunburst(), el('div', { class: 'scroll risk-table-box' }, table));
+}
+
+for (const name of Object.keys(RISK_CHOICES)) {
+  for (const b of document.querySelectorAll(`[data-${name}]`)) {
+    b.addEventListener('click', () => {
+      riskView[name] = b.dataset[name];
+      try { localStorage.setItem('risk-' + name, riskView[name]); } catch { /* storage blocked: the choice just isn't kept */ }
+      if (snap) renderRisks();
+    });
+  }
+}
+
 // --- page -------------------------------------------------------------------------------------------------------
 
 /** Draws every section from `snap`, then reopens the list in the URL hash, if any. */
@@ -284,9 +434,7 @@ function render() {
   document.getElementById('flight').replaceChildren(...snap.in_flight.groups.map((g) =>
     el('div', { class: 'flight-group' + kindClass(g.kind) }, el('h3', { text: g.title }), el('div', { class: 'tiles' }, ...g.tiles.map(tile)))));
 
-  document.querySelector('#risks-all span').textContent = String(snap.risks.total);
-  grid(document.getElementById('risks'), 'risks', RISK_COLUMNS,
-    snap.risks.top.map((s, i) => ({ ...s, rank: i + 1, rec: snap.records[s.key] })));
+  renderRisks();
 
   showList();
 }
@@ -405,11 +553,14 @@ document.querySelector('#list .close').addEventListener('click', (e) => {
 });
 document.getElementById('refresh').addEventListener('click', async (e) => {
   const btn = e.currentTarget;
+  // An icon button: its name is the label, so that's what says it's busy (the icon spins too).
   btn.disabled = true;
-  btn.textContent = 'Refreshing…';
+  btn.setAttribute('aria-label', 'Refreshing…');
+  btn.title = 'Refreshing…';
   await load(true);
   btn.disabled = false;
-  btn.textContent = 'Refresh now';
+  btn.setAttribute('aria-label', 'Refresh now');
+  btn.title = 'Refresh now';
 });
 window.addEventListener('hashchange', showList);
 load();

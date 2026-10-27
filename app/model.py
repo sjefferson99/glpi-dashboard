@@ -46,7 +46,6 @@ RISK_SECURITY = 15
 RISK_INTERNET = 15
 RISK_AGE_MAX, RISK_AGE_DAYS = 15, 180
 RISK_PER_INCIDENT, RISK_INCIDENTS_MAX = 5, 15
-RISK_TOP = 20
 
 FORM = {"Ticket": "ticket", "Problem": "problem", "Change": "change"}
 PLAIN_ITEMTYPE = re.compile(r"[A-Za-z_]+")
@@ -134,20 +133,23 @@ class Builder:
             out.setdefault(r[id_field], []).append(key)
         return out
 
-    def add_list(self, key, title, keys):
+    def add_list(self, key, title, keys, kind=None):
         """Registers a drill-down list. Every count on the page must come from here.
 
         Args:
             key: The list's id, used in ``#list=<key>`` links.
             title: The heading shown above the list.
             keys: Record keys; duplicates are dropped.
+            kind: Which columns the page shows. ``"risks"`` keeps ``keys`` in the order given (risk score);
+                the default lists records by priority, then age.
 
         Returns:
             The number of records in the list, which is the count to show.
         """
         keys = list(dict.fromkeys(keys))
-        keys.sort(key=lambda k: (-self.records[k]["priority"], -self.records[k]["age_days"]))
-        self.lists[key] = {"title": title, "refs": keys}
+        if kind != "risks":
+            keys.sort(key=lambda k: (-self.records[k]["priority"], -self.records[k]["age_days"]))
+        self.lists[key] = {"title": title, "refs": keys, **({"kind": kind} if kind else {})}
         return len(keys)
 
     def add_table(self, key, title, kind, rows):
@@ -315,11 +317,15 @@ class Builder:
         return {"areas": out_areas, "cis": out_cis}
 
     def risks(self):
-        """Scores open problems and changes (not Applied, not standard changes).
+        """Scores open problems and changes (not Applied, not standard changes) and groups them for the chart.
+
+        Each scored record gets ``risk``: its ``rank``, ``score`` and the breakdown in ``why``. Every group is a
+        list in score order, so a chart segment opens the same ranking, filtered.
 
         Returns:
-            The top ``RISK_TOP`` with each score's breakdown in ``why``, the total, and the
-            ``risks-all`` list in score order (registered directly, since ``add_list`` sorts by priority).
+            The ``total`` and its ``list`` (``risks-all``), plus ``priorities`` (highest first) and ``kinds``
+            (problems, then changes) as groups, and ``cells``, one per priority and kind. Each has a ``count``
+            and its ``list``; empty ones are left out.
         """
         R = self.records
         open_incidents = set(self.open_of("Incident"))
@@ -353,9 +359,31 @@ class Builder:
                 why.append(f"{n} open incident(s) +{bonus}")
             scored.append({"key": k, "score": score, "why": why})
         scored.sort(key=lambda s: (-s["score"], -R[s["key"]]["age_days"]))
-        self.lists["risks-all"] = {"title": "All open problems and changes, by risk score",
-                                   "refs": [s["key"] for s in scored]}
-        return {"top": scored[:RISK_TOP], "total": len(scored), "list": "risks-all"}
+        ranked = [s["key"] for s in scored]
+        for rank, s in enumerate(scored, 1):
+            R[s["key"]]["risk"] = {"rank": rank, "score": s["score"], "why": s["why"]}
+
+        def group(key, title, keys, **fields):
+            return {**fields, "count": self.add_list(key, title, keys, "risks"), "list": key}
+
+        # Groups come from the records themselves, so the segments always add up to the total.
+        names = {R[k]["priority"]: R[k]["priority_name"] for k in ranked}
+        kinds_present = [kind for kind in ("Problem", "Change") if any(R[k]["kind"] == kind for k in ranked)]
+        priorities, kinds, cells = [], [], []
+        for p in sorted(names, reverse=True):
+            keys = [k for k in ranked if R[k]["priority"] == p]
+            priorities.append(group(f"risks-p{p}", f"Risks at {names[p]} priority", keys,
+                                    priority=p, name=names[p]))
+            for kind in kinds_present:
+                sel = [k for k in keys if R[k]["kind"] == kind]
+                if sel:
+                    cells.append(group(f"risks-p{p}-{kind.lower()}", f"Risks: {kind.lower()}s at {names[p]} priority",
+                                       sel, priority=p, kind=kind))
+        for kind in kinds_present:
+            kinds.append(group(f"risks-{kind.lower()}", f"Risks: {kind.lower()}s",
+                               [k for k in ranked if R[k]["kind"] == kind], kind=kind))
+        total = self.add_list("risks-all", "All open problems and changes, by risk score", ranked, "risks")
+        return {"total": total, "list": "risks-all", "priorities": priorities, "kinds": kinds, "cells": cells}
 
     def recurring(self):
         """Returns the active recurring changes, each with the open changes made from it.

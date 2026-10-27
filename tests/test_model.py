@@ -42,6 +42,8 @@ def _counts(snap):
         yield p["open"], p["open_list"]
         yield p["total"], p["total_list"]
     yield snap["risks"]["total"], snap["risks"]["list"]
+    for g in snap["risks"]["priorities"] + snap["risks"]["kinds"] + snap["risks"]["cells"]:
+        yield g["count"], g["list"]
 
 
 def _length(lst):
@@ -298,25 +300,32 @@ def test_cis_with_open_issues(snap):
 
 # --- risks ----------------------------------------------------------------------------------------------------
 
+def _risks(snap):
+    """(key, risk) for every ranked record, in rank order."""
+    return [(k, snap["records"][k]["risk"]) for k in refs(snap, "risks-all")]
+
+
 def test_risk_scores_and_order(snap):
-    top = [(s["key"], s["score"]) for s in snap["risks"]["top"]]
     # C1: High 45 + security 15 + internet 15 + age 5 d rounds to 0          = 75
     # P1: Medium 25 + security 15 + internet 15 + age 90/180*15 = 8 + 1 incident 5 = 68
     # C2: Medium 25 + internet (firewall, an extra) 15 + age capped at 15   = 55
-    assert top == [("Change:1", 75), ("Problem:1", 68), ("Change:2", 55)]
+    assert [(k, r["rank"], r["score"]) for k, r in _risks(snap)] == [
+        ("Change:1", 1, 75), ("Problem:1", 2, 68), ("Change:2", 3, 55)]
     assert snap["risks"]["total"] == 3
+    assert snap["lists"]["risks-all"]["kind"] == "risks"
 
 
 def test_risk_explains_each_point(snap):
-    why = {s["key"]: s["why"] for s in snap["risks"]["top"]}
+    why = {k: r["why"] for k, r in _risks(snap)}
     assert why["Problem:1"] == ["priority Medium +25", "security +15", "internet-facing (web1) +15",
                                 "age 90 d +8", "1 open incident(s) +5"]
     assert why["Change:2"] == ["priority Medium +25", "internet-facing (firewall) +15", "age 200 d +15"]
 
 
 def test_risks_skip_applied_and_standard_changes(snap):
-    keys = {s["key"] for s in snap["risks"]["top"]}
+    keys = set(refs(snap, "risks-all"))
     assert "Change:3" not in keys and "Change:4" not in keys
+    assert "risk" not in snap["records"]["Change:3"]
 
 
 def test_incident_bonus_is_capped():
@@ -324,16 +333,36 @@ def test_incident_bonus_is_capped():
     for i in range(10, 20):
         data["Ticket"].append({**data["Ticket"][1], "id": i})
         data["Problem_Ticket"].append({"id": i, "problems_id": 1, "tickets_id": i})
-    p1 = next(s for s in build(data)["risks"]["top"] if s["key"] == "Problem:1")
+    p1 = build(data)["records"]["Problem:1"]["risk"]
     assert p1["why"][-1] == f"11 open incident(s) +{model.RISK_INCIDENTS_MAX}"
 
 
-def test_top_risks_are_capped_but_the_list_has_all():
+def test_risks_group_by_priority_and_kind(snap):
+    risks = snap["risks"]
+    assert [(p["priority"], p["name"], p["count"]) for p in risks["priorities"]] == [(4, "High", 1), (3, "Medium", 2)]
+    assert [(k["kind"], k["count"]) for k in risks["kinds"]] == [("Problem", 1), ("Change", 2)]
+    # Empty cells (High problems) are left out.
+    assert [(c["priority"], c["kind"], c["count"]) for c in risks["cells"]] == [
+        (4, "Change", 1), (3, "Problem", 1), (3, "Change", 1)]
+    assert refs(snap, "risks-p3") == ["Problem:1", "Change:2"]        # score order, not priority then age
+    assert refs(snap, "risks-change") == ["Change:1", "Change:2"]
+    assert refs(snap, "risks-p3-change") == ["Change:2"]
+    assert snap["lists"]["risks-p3-problem"]["title"] == "Risks: problems at Medium priority"
+
+
+def test_risk_groups_each_add_up_to_the_total(snap):
+    risks = snap["risks"]
+    for groups in (risks["priorities"], risks["kinds"], risks["cells"]):
+        assert sum(g["count"] for g in groups) == risks["total"]
+        assert sorted(k for g in groups for k in refs(snap, g["list"])) == sorted(refs(snap, "risks-all"))
+
+
+def test_risk_groups_use_the_priorities_present():
     data = model_input()
-    data["Problem"] = [{**data["Problem"][0], "id": i} for i in range(1, model.RISK_TOP + 6)]
+    data["Problem"][0]["priority"] = 9                    # not one GLPI defines
     risks = build(data)["risks"]
-    assert len(risks["top"]) == model.RISK_TOP
-    assert risks["total"] == model.RISK_TOP + 5 + 2   # + C1, C2
+    assert [(p["priority"], p["name"]) for p in risks["priorities"]] == [(9, "?"), (4, "High"), (3, "Medium")]
+    assert sum(p["count"] for p in risks["priorities"]) == risks["total"]
 
 
 # --- in flight ------------------------------------------------------------------------------------------------
@@ -438,7 +467,8 @@ def test_empty_glpi():
     snap = build({**empty, "cis": {}})
     assert all(t["count"] == 0 for t in snap["summary"])
     assert snap["health"] == {"areas": [], "cis": [], "recurring": []}
-    assert snap["risks"]["top"] == [] and snap["records"] == {}
+    assert snap["risks"] == {"total": 0, "list": "risks-all", "priorities": [], "kinds": [], "cells": []}
+    assert snap["records"] == {}
 
 
 def test_area_names_make_safe_list_keys():
