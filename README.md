@@ -4,6 +4,11 @@ A read-only web page showing the state of your IT service management in [GLPI](h
 what's open, what's at risk, and what's in flight. GLPI is the only source. Monitoring tools that feed GLPI
 (through their own integrations) stay the place for real-time data.
 
+This project is just my own view of my estate that suits how I work; There is no customisation capability in
+the app itself. However, with good categorisation and prioritisation it provides another view on your GLPI
+instance. And in the magic world of AI we now live in, forking and adjusting the design to tweak to your
+requirements is trivial and a better solution right now than me adding customisation options in directly.
+
 ## What it shows
 
 The page has five tabs. The browser remembers the last one you chose.
