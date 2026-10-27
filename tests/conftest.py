@@ -24,5 +24,5 @@ def app_state(monkeypatch, fake):
     monkeypatch.setattr(main, "INTERNET_ROOTS", ROOTS)
     monkeypatch.setattr(main, "INTERNET_EXTRA", EXTRA)
     monkeypatch.setattr(main, "refresh_lock", asyncio.Lock())
-    monkeypatch.setattr(main, "state", {"snapshot": None, "error": None, "refreshed_at": None})
+    monkeypatch.setattr(main, "state", {"snapshot": None, "search": None, "error": None, "refreshed_at": None})
     return main.state

@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -45,7 +45,7 @@ ITIL = ("Ticket", "Problem", "Change", "ITILCategory", "Item_Ticket", "Item_Prob
 # The Refresh now button re-reads GLPI at most this often; quicker clicks get the current snapshot.
 MANUAL_MIN_SECONDS = 30
 
-state = {"snapshot": None, "error": None, "refreshed_at": None}
+state = {"snapshot": None, "search": None, "error": None, "refreshed_at": None}
 refresh_lock = asyncio.Lock()
 
 
@@ -95,10 +95,14 @@ async def collect(glpi):
 
 
 async def refresh(glpi):
-    """Rebuilds the snapshot from GLPI and clears any recorded error."""
+    """Rebuilds the snapshot and the search index from GLPI and clears any recorded error."""
     data = await collect(glpi)
     now = datetime.now()
-    state["snapshot"] = model.build(data, now, GLPI_PUBLIC_URL, INTERNET_ROOTS, INTERNET_EXTRA)
+    builder = model.Builder(data, now, GLPI_PUBLIC_URL, INTERNET_ROOTS, INTERNET_EXTRA)
+    snapshot = builder.build()
+    index = builder.search_index()
+    # Both are built before either is published, so a failure leaves the last pair (and its time) together.
+    state["snapshot"], state["search"] = snapshot, index
     state["refreshed_at"] = now
     state["error"] = None
     log.info("refreshed: %d records", len(state["snapshot"]["records"]))
@@ -175,6 +179,19 @@ async def manual_refresh():
         if at is None or (datetime.now() - at).total_seconds() >= MANUAL_MIN_SECONDS:
             await refresh_once(app.state.glpi)
     return await snapshot()
+
+
+@app.get("/api/search")
+def search(q: str = Query("", max_length=model.SEARCH_MAX), closed: bool = False):
+    """Searches what the last refresh read, closed records only if asked; 503 before the first refresh.
+
+    No GLPI requests are made, so a search costs GLPI nothing and shows the data as of that refresh. It's a
+    plain ``def``, so FastAPI runs the scan in its threadpool rather than holding up the event loop; that's
+    safe because a refresh replaces the index whole, never changing one in use.
+    """
+    if state["search"] is None:
+        return JSONResponse({"error": state["error"] or "first refresh still running"}, status_code=503)
+    return model.search(state["search"], q, closed)
 
 
 @app.get("/healthz")

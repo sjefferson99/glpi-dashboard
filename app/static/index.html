@@ -11,8 +11,14 @@
 <body>
   <header class="top">
     <h1><img src="logo.svg" alt="" class="logo">Network state</h1>
+    <form id="search-form" class="search" role="search">
+      <label for="search" class="visually-hidden">Search records, projects and CIs</label>
+      <input id="search" type="search" placeholder="Search records, projects and CIs" maxlength="100"
+             autocomplete="off" spellcheck="false">
+      <label class="check"><input id="search-closed" type="checkbox"> Include closed</label>
+    </form>
     <p class="meta"><span id="updated">Loading…</span> · from <a id="glpi-link" href="#" target="_blank" rel="noopener">GLPI</a>
-      <button id="refresh" class="icon-btn" type="button" aria-label="Refresh now" title="Refresh now">
+      <button id="refresh" class="icon-btn refresh" type="button" aria-label="Refresh now" title="Refresh now">
         <svg class="refresh-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 3v5h5"/>
           <path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 21v-5h-5"/>
@@ -86,7 +92,19 @@
       <h2 id="list-title"></h2>
       <a href="#" class="close" aria-label="Close list">✕</a>
     </div>
-    <p id="list-count" class="meta"></p>
+    <form id="list-search-form" class="search" role="search" hidden>
+      <label for="list-search" class="visually-hidden">Search records, projects and CIs</label>
+      <input id="list-search" type="search" maxlength="100" autocomplete="off" spellcheck="false">
+      <label class="check"><input id="list-closed" type="checkbox"> Include closed</label>
+    </form>
+    <p id="search-data" class="meta" hidden><span id="search-data-text"></span>
+      <button id="list-refresh" class="icon-btn refresh" type="button" aria-label="Refresh now" title="Refresh now">
+        <svg class="refresh-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 3v5h5"/>
+          <path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 21v-5h-5"/>
+        </svg>
+      </button></p>
+    <p id="list-count" class="meta" aria-live="polite"></p>
     <div class="scroll"><table class="grid" aria-labelledby="list-title"><tbody id="list-rows"></tbody></table></div>
   </dialog>
 </body>

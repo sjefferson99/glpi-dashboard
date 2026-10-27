@@ -57,6 +57,20 @@ when each record was opened and last updated.
 Every table sorts by any column: click a header, and click again to reverse. Tables show 10 rows, with
 **Show more** and **Show all** below, and **Show less** to go back to 10. Escape, ✕ or a click outside a list closes it.
 
+**Search**: the box at the top right, beside the update time, searches the open tickets, problems and changes,
+the projects and the CIs the dashboard read. Tick **Include closed** to search closed records too. It's off by
+default, which also keeps searches quicker. Pause typing for half a second, or press Enter, and the results open over
+the page. They have their own search box (✕ clears it) and Include closed, to refine them, and say which refresh
+they search. Their **Refresh now** button re-reads GLPI and searches again. A result must contain every word typed
+(ignoring case), in its title, description, category, status, reference or linked CI names, or for a CI its
+serial, inventory number or comment. An exact `#id` comes first, then title matches, then everything but closed
+records, most recently updated first. Words found only in the description are shown in context. Up to 100
+results are listed, with the total. Searches can be bookmarked (`#search=<words>`, plus `&closed=1`). Only CIs of
+the types linked to a record (or in the impact graph) are searched, since those are the ones the dashboard reads.
+Followups, tasks and solutions aren't searched: reading them would cost GLPI many more requests. Search shows
+description text, which the rest of the page doesn't, so anyone who can open the dashboard can read the
+descriptions.
+
 "Internet-facing" comes from GLPI's impact graph: the CIs impacted by `INTERNET_FACING_ROOTS` (typically your
 reverse proxy), plus the CIs named in `INTERNET_FACING_EXTRA` (e.g. the firewall).
 
@@ -64,6 +78,8 @@ reverse proxy), plus the CIs named in `INTERNET_FACING_EXTRA` (e.g. the firewall
 
 `app/main.py` (FastAPI) refreshes a snapshot from GLPI every `REFRESH_SECONDS` (300) in the background. It
 serves the snapshot at `/api/snapshot`, along with the static page (`app/static/`, no build step).
+Each refresh also keeps a search index in memory, and `/api/search?q=<words>` (with `&closed=true` for closed records too) searches that, so a search
+makes no GLPI requests and shows the data as of the last refresh.
 
 - **If GLPI is unreachable**, the last snapshot stays, with a banner.
 - **`/healthz`** fails once the data is three refreshes old.

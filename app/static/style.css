@@ -98,6 +98,7 @@
 .kind-change { --k: var(--k-change); }
 .kind-project { --k: var(--k-project); }
 .kind-issue { --k: var(--k-issue); }
+.kind-ci { --k: var(--text-secondary); }
 .prio-1 { --k: var(--pt1); }
 .prio-2 { --k: var(--pt2); }
 .prio-3 { --k: var(--pt3); }
@@ -124,9 +125,10 @@ a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
 .top, main { max-width: 1200px; margin: 0 auto; padding: 0 16px; }
-/* The title on the left; when it was updated and Refresh on the right, on the title's baseline. */
-.top { padding-top: 20px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end;
-       gap: 4px 16px; }
+/* The title on the left; search, when it was updated and Refresh on the right, on the title's baseline. */
+.top { padding-top: 20px; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 16px; }
+.top .search { margin-left: auto; flex-wrap: nowrap; }
+.top .search input[type="search"] { width: auto; flex: 1 1 260px; min-width: 120px; max-width: 260px; }
 .top .meta { margin: 0; font-size: 0.8rem; }
 h1 { font-size: 1.5rem; margin: 0; display: flex; align-items: center; gap: 10px; }
 .logo { width: 36px; height: 36px; padding: 2px; background: #fcfcfb; border-radius: 8px; }
@@ -276,3 +278,24 @@ dialog::backdrop { background: rgb(0 0 0 / 0.45); }
 .dialog-head h2 { margin: 0; }
 .close { text-decoration: none; font-size: 1.2rem; padding: 0 4px; }
 .empty { color: var(--text-secondary); padding: 12px; }
+
+/* Search: the box in the header, and the same box at the top of the results, each with Include closed. */
+.search { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0; }
+.search input[type="search"] { width: min(320px, 100%); font: inherit; font-size: 0.9rem; padding: 5px 9px;
+                               color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--border);
+                               border-radius: 6px; }
+.search input[type="search"]::placeholder { color: var(--text-secondary); opacity: 1; }
+.search input[type="search"]:hover { border-color: var(--focus); }
+.search input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.check { display: inline-flex; align-items: center; gap: 4px; color: var(--text-secondary); font-size: 0.85rem;
+         cursor: pointer; white-space: nowrap; }
+.check input { margin: 0; accent-color: var(--focus); cursor: pointer; }
+#list .search { margin: 10px 0 0; }
+#list .search[hidden] { display: none; }
+#list .search input[type="search"] { width: min(480px, 100%); }
+#search-data { margin: 6px 0 0; font-size: 0.8rem; }
+/* Search results hang from a fixed top, so the box doesn't jump about as the results grow and shrink. */
+dialog.searching { width: min(1500px, calc(100vw - 32px)); margin: 48px auto auto; max-height: calc(100vh - 72px); }
+.grid td.snippet { color: var(--text-secondary); font-size: 0.82rem; min-width: 16em; }
+/* A light tint, so link text on it keeps 4.5:1 in both themes; bold keeps it easy to spot. */
+mark { color: inherit; font-weight: 600; background: color-mix(in srgb, var(--warning) 20%, transparent); border-radius: 2px; }

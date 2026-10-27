@@ -52,6 +52,9 @@ That belongs in the issue and the PR.
   `http://127.0.0.1:8000`. Do this after every round of changes. The user tries it against their real GLPI
   and fine-tunes with you. Ask to commit only after they're happy with it. The local `.env` points
   `GLPI_URL` at GLPI's public address. Don't read or edit `.env`.
+- **Review the README before every PR push.** Read it against the branch's changes (`git diff main...`) and
+  update anything they made out of date: what the page shows, endpoints, settings, how it works. Do it
+  every time, including pushes to an open PR, not only for big features.
 - **A Claude code review before every merge.** Run `/code-review` on the PR as **one sequential pass with no
   sub-agents**. Reproduce each finding against a crafted input before reporting it. Post the findings as PR
   comments (labelled as below), then stop. Fixes wait for the user's approval, even obvious ones. Re-run the
