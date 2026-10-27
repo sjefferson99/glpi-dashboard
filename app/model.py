@@ -511,6 +511,57 @@ class Builder:
                    for k, r in self.records.items() if k in used}
         return {**view, "lists": self.lists, "records": records, "glpi_url": self.url}
 
+    def explorer(self):
+        """Returns every ticket, problem and change, closed too, as the Record explorer groups and lists them.
+
+        Call it after ``build()``. The page groups these rows itself, so a box's size and the list it opens are
+        the same rows and can't disagree. They come in the drill-down lists' order: priority, then age.
+
+        Returns:
+            One row per record: the fields the explorer groups by and shows, plus ``assigned`` (someone or some
+            group is assigned), ``cis`` (the names of its linked CIs) and ``family`` (see ``families()``).
+        """
+        fields = ("key", "kind", "ref", "status", "open", "priority", "priority_name", "category", "area", "date",
+                  "updated", "age_days", "url")
+        family = self.families()
+        rows = sorted(self.records.values(), key=lambda r: (-r["priority"], -r["age_days"]))
+        return [{**{f: r[f] for f in fields}, "name": r["name"] or "", "assigned": r["_assigned"],
+                 "cis": [c["name"] for c in r["cis"]], "family": family.get(r["key"], "")} for r in rows]
+
+    def families(self):
+        """Names each set of records joined by problem-ticket and change-problem links, after its lead record.
+
+        A record is in one family at most, so grouping by family counts each once. The lead is the family's
+        lowest-numbered problem, else its lowest-numbered change.
+
+        Returns:
+            The family's name, e.g. ``"Problem #1: Disk full"``, by record key; unlinked records are left out.
+        """
+        parent = {}
+
+        def find(k):
+            while parent.setdefault(k, k) != k:
+                parent[k] = parent[parent[k]]
+                k = parent[k]
+            return k
+
+        links = [(f"Problem:{r['problems_id']}", f"Ticket:{r['tickets_id']}") for r in self.d["Problem_Ticket"]]
+        links += [(f"Change:{r['changes_id']}", f"Problem:{r['problems_id']}") for r in self.d["Change_Problem"]]
+        for a, b in links:
+            if a in self.records and b in self.records:     # a link to a deleted record joins nothing
+                parent[find(a)] = find(b)
+        members = {}
+        for k in parent:
+            members.setdefault(find(k), []).append(self.records[k])
+        rank = {"Problem": 0, "Change": 1, "Ticket": 2}
+        out = {}
+        for recs in members.values():
+            lead = min(recs, key=lambda r: (rank[r["itemtype"]], r["id"]))
+            name = f"{lead['ref']}: {lead['name']}" if lead["name"] else lead["ref"]
+            for r in recs:
+                out[r["key"]] = name
+        return out
+
     def search_index(self):
         """Returns everything a search looks through: each ticket, problem and change (closed too), project and CI.
 

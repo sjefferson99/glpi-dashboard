@@ -18,7 +18,7 @@ That belongs in the issue and the PR.
 |---|---|
 | `app/glpi.py` | Read-only GLPI **v1** API client: session, paging, error codes |
 | `app/model.py` | Turns raw GLPI rows into the page's views; status maps, `RISK_*` weights |
-| `app/main.py` | FastAPI app: background refresh loop, `/api/snapshot`, `/api/refresh`, `/healthz`, security headers |
+| `app/main.py` | FastAPI app: background refresh loop, `/api/snapshot`, `/api/refresh`, `/api/search`, `/api/explorer`, `/healthz`, security headers |
 | `app/static/` | `index.html`, `app.js`, `style.css`, `logo.svg`, served by the same app |
 | `Dockerfile` | Pinned `python:*-slim`, runs as UID 10001 |
 | `compose.yml` | Generic deploy: pulls the GHCR image, publishes on localhost; commented reverse-proxy example |
@@ -87,7 +87,8 @@ That belongs in the issue and the PR.
 - **v1 API only.** v2 has no endpoints for the links between records and CIs or projects.
 - **A count is the length of its list.** Every number comes from `Builder.add_list()` and links to
   `#list=<key>`, so a count and its records can't disagree. A new tile or count must go through `add_list`,
-  never through a separate count.
+  never through a separate count. The one exception is the Record explorer: its boxes are any combination of
+  groupings, so the page groups `/api/explorer`'s rows itself, and each box's count and list are the same array.
 - **GLPI text goes into the DOM with `textContent` only**, via the `el()` helper in `app.js`, never
   `innerHTML` (DOM-XSS). The CSP in `main.py` is `default-src 'self'`, so no inline scripts and no CDNs.
 - **`/healthz` gives nothing away.** Deployments leave it reachable without auth for monitors, so it

@@ -34,6 +34,7 @@
       <button type="button" role="tab" id="tab-recurring" aria-controls="panel-recurring">Recurring changes</button>
       <button type="button" role="tab" id="tab-cmdb" aria-controls="panel-cmdb">CMDB</button>
       <button type="button" role="tab" id="tab-risks" aria-controls="panel-risks">Risk analysis</button>
+      <button type="button" role="tab" id="tab-explorer" aria-controls="panel-explorer">Record explorer</button>
     </div>
 
     <section id="panel-summary" role="tabpanel" aria-labelledby="tab-summary" tabindex="0">
@@ -84,6 +85,39 @@
         </div>
       </div>
       <div id="risks" class="risks"></div>
+    </section>
+
+    <section id="panel-explorer" role="tabpanel" aria-labelledby="tab-explorer" tabindex="0" hidden>
+      <h2 id="h-explorer">Record explorer</h2>
+      <p class="hint">Every ticket, problem and change, in boxes within boxes: each box's size is its number of
+        records. Pick a box to list its records beside the map.</p>
+      <form id="explore-form" class="explore-tools">
+        <label>Group by <select id="explore-tier-1"></select></label>
+        <label>then by <select id="explore-tier-2"></select></label>
+        <label>then by <select id="explore-tier-3"></select></label>
+        <label>Colour by <select id="explore-colour"></select></label>
+        <label class="check"><input id="explore-closed" type="checkbox"> Include closed</label>
+      </form>
+      <p id="explore-note" class="hint" hidden>A record linked to several CIs is in the box of each, so a box's records
+        can add up to more than the records shown.</p>
+      <p id="explore-error" class="banner" role="alert" hidden></p>
+      <div class="explorer">
+        <figure class="treemap-box">
+          <nav id="explore-crumbs" class="crumbs" aria-label="Zoom"></nav>
+          <div id="treemap" class="treemap" role="group" aria-labelledby="h-explorer"></div>
+          <figcaption id="treemap-caption" class="risk-caption" aria-hidden="true"></figcaption>
+        </figure>
+        <section class="explore-list" aria-labelledby="explore-title">
+          <h3 id="explore-title">All records</h3>
+          <p id="explore-count" class="meta" aria-live="polite"></p>
+          <p class="explore-actions"><button id="explore-zoom" type="button" class="btn" hidden>Zoom in</button></p>
+          <div class="scroll"><table id="explore-rows" class="grid" aria-labelledby="explore-title"><tbody></tbody></table></div>
+        </section>
+      </div>
+      <details id="explore-table-box" class="explore-table">
+        <summary>The same groups as a table</summary>
+        <div class="scroll"><table id="explore-table" class="grid" aria-labelledby="h-explorer"><tbody></tbody></table></div>
+      </details>
     </section>
   </main>
 
