@@ -216,10 +216,16 @@ GLPI, the page shows the "first refresh still running" or error banner, and `/he
 - Run a Snyk Code scan (`snyk_code_scan`) on new or modified first-party code. Fix any new findings in the
   changed code and rescan until it reports none.
 - **GitHub Actions are pinned to a full commit SHA**, with the version in a trailing comment. When adding
-  or bumping one, pick a release at least two weeks old. Lint workflow changes with actionlint:
+  or bumping one, pick a release at least **one week** old (Dependabot's `cooldown` waits for this). A
+  hijacked Action release runs with CI's token and could push a tampered image, and tests wouldn't notice;
+  such releases are usually caught within days. Lint workflow changes with actionlint:
   `MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd -W):/repo:ro" -w /repo rhysd/actionlint:1.7.12 -no-color`.
+- **Python packages and the base image take the latest release**, with no wait: the test suites exercise
+  them, so fix what breaks.
 - After changing the `Dockerfile`, the base image or `requirements.txt`, also run a Snyk container scan
   and an SCA scan. Pins are exact: bump them deliberately, not with ranges.
+- **Dependabot PRs need no issue.** Combine the open ones on one branch (`deps-<date>`) into one PR, so `main`
+  builds one image, not one per bump. Dependabot groups each ecosystem's weekly updates into one PR anyway.
 
 ## Working rules
 
