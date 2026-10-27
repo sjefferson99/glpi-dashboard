@@ -9,6 +9,8 @@ the app itself. However, with good categorisation and prioritisation it provides
 instance. And in the magic world of AI we now live in, forking and adjusting the design to tweak to your
 requirements is trivial and a better solution right now than me adding customisation options in directly.
 
+The screenshots below come from a generated demo dataset, not a real GLPI.
+
 ## What it shows
 
 The page has six tabs. The browser remembers the last one you chose.
@@ -23,14 +25,26 @@ The page has six tabs. The browser remembers the last one you chose.
   - **Health at a glance**: open incidents and problems per area (the top level of the ITIL category tree),
     rated red/amber/green. Red means any High or above. Amber means any incident or Medium problem. Anything
     else is green. The state is always shown as an icon and a word, not colour alone.
+
+  ![The Summary tab: open record counts, record quality tiles and health per area](docs/screenshots/summary.png)
+
 - **In flight**: open incidents, requests and problems by status; changes awaiting approval, at
   Accepted/Testing/Qualification, or Applied but not closed; and a Projects tile that lists each project
   with its progress and linked records.
+
+  ![The In flight tab: open records by status, changes by stage, and projects](docs/screenshots/in-flight.png)
+
 - **Recurring changes**: the open changes made by each active recurring change (e.g. monthly patching), and
   the schedule (next creation and due dates). GLPI doesn't link a change back to the recurring change that
   created it, so a change counts if its title starts with the recurring change's name (ignoring case; the
   longest matching name wins).
+
+  ![The Recurring changes tab: open changes per recurring change, and the schedule](docs/screenshots/recurring.png)
+
 - **CMDB**: the hosts and stacks (CIs) with open incidents or problems, rated like the areas.
+
+  ![The CMDB tab: CIs with open issues, each rated Act, Watch or OK](docs/screenshots/cmdb.png)
+
 - **Risk analysis**: open problems and changes (not Applied, not standard changes), as a two-ring chart
   beside a table of the same counts. The inner ring splits them by priority, and the outer ring splits each
   priority into problems and changes. **Record type** swaps the rings. **Colours** picks how priority is
@@ -40,6 +54,9 @@ The page has six tabs. The browser remembers the last one you chose.
   on a problem; the table's All / All opens every one. The weights are `RISK_*` in `app/model.py`, and the
   "Why" column shows each record's breakdown, so they're easy to tune. The table names every priority, so
   colour is never the only cue: six traffic-light steps can't all stay distinct for colour-blind readers.
+
+  ![The Risk analysis tab: a two-ring chart of open problems and changes by priority, beside a table](docs/screenshots/risks.png)
+
 - **Record explorer**: every ticket, problem and change as a treemap, boxes within boxes in the manner of
   WinDirStat, each box sized by its number of records. **Group by** and up to two **then by**s pick the
   nesting from record type, priority, area, category, status, open or closed, assigned or not, has a CI or
@@ -59,6 +76,8 @@ The page has six tabs. The browser remembers the last one you chose.
   the groupings and colour. *The same groups as a table* below the map holds every group and count as text,
   for anyone not using the map. Every box has a name for screen readers and works from the keyboard.
 
+  ![The Record explorer tab: a treemap of records by type, priority and area, beside their list](docs/screenshots/explorer.png)
+
 Each kind of record has its own colour, used the same way everywhere: incidents blue, requests teal, problems
 orange, changes green and projects violet. Tiles that flag an issue across kinds (High priority, and record
 quality checks such as No CI) are red; one that is about a single kind (e.g. Orphan problems) keeps that
@@ -72,6 +91,8 @@ it is dimmed: no fill, a dashed grey border and a grey number.
 computed as the length of that list, so the two can't disagree. (The Record explorer's boxes are grouped in the
 page, each from the same records it lists, so they can't disagree either.) Lists can be bookmarked. Record lists show
 when each record was opened and last updated.
+
+![The list behind the High priority tile, each record linking to GLPI](docs/screenshots/list.png)
 
 Every table sorts by any column: click a header, and click again to reverse. Tables show 10 rows, with
 **Show more** and **Show all** below, and **Show less** to go back to 10. Escape, ✕ or a click outside a list closes it.
@@ -89,6 +110,8 @@ the types linked to a record (or in the impact graph) are searched, since those 
 Followups, tasks and solutions aren't searched: reading them would cost GLPI many more requests. Search shows
 description text, which the rest of the page doesn't, so anyone who can open the dashboard can read the
 descriptions.
+
+![Search results for vpn, closed records included, one found in a description](docs/screenshots/search.png)
 
 "Internet-facing" comes from GLPI's impact graph: the CIs impacted by `INTERNET_FACING_ROOTS` (typically your
 reverse proxy), plus the CIs named in `INTERNET_FACING_EXTRA` (e.g. the firewall).
@@ -193,4 +216,12 @@ uv pip install -r requirements.txt -r requirements-dev.txt
 .venv\Scripts\python.exe -m playwright install chromium
 .venv\Scripts\python.exe -m pytest            # unit + API
 .venv\Scripts\python.exe -m pytest ui-tests   # browser
+```
+
+To try the page without a GLPI, `scripts/demo.py` serves it at `http://127.0.0.1:8001` on a generated demo
+dataset (`tests/demo_glpi.py`: about 200 records from a fixed seed, all generic names). The screenshots above come
+from it; `scripts/demo.py shot --help` takes one.
+
+```powershell
+.venv\Scripts\python.exe scripts/demo.py
 ```
