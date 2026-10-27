@@ -6,19 +6,45 @@ what's open, what's at risk, and what's in flight. GLPI is the only source. Moni
 
 ## What it shows
 
-- **Summary**: open incidents, requests, problems and changes; High-priority records; records without a
-  category.
-- **Health at a glance**: open incidents and problems per area (the top level of the ITIL category tree) and
-  per linked CI, rated red/amber/green. Red means any High or above. Amber means any incident or Medium
-  problem. Anything else is green. The state is always shown as an icon and a word, not colour alone.
-- **Ranked risks**: open problems and changes (not Applied, not standard changes) by a score made of
+The page has five tabs. The browser remembers the last one you chose.
+
+- **Summary**: open incidents, requests, problems and changes, and High-priority records.
+  - **Record quality**: open records missing something the GLPI working rules ask for. That's no category;
+    no CI (incidents, problems and changes only, since requests often have none); no technician or group
+    assigned; no update in 30 days (`STALE_DAYS`); problems linked to no incident and no change; and, for
+    changes other than standard changes, still in New with no approval requested, or an empty Impacts,
+    Deployment plan, Backup plan or Checklist. Each tile has a short label; hover or focus it for half a
+    second to see the full rule, and press Escape to hide it.
+  - **Health at a glance**: open incidents and problems per area (the top level of the ITIL category tree),
+    rated red/amber/green. Red means any High or above. Amber means any incident or Medium problem. Anything
+    else is green. The state is always shown as an icon and a word, not colour alone.
+- **In flight**: open incidents, requests and problems by status; changes awaiting approval, at
+  Accepted/Testing/Qualification, or Applied but not closed; and a Projects tile that lists each project
+  with its progress and linked records.
+- **Recurring changes**: the open changes made by each active recurring change (e.g. monthly patching), and
+  the schedule (next creation and due dates). GLPI doesn't link a change back to the recurring change that
+  created it, so a change counts if its title starts with the recurring change's name (ignoring case; the
+  longest matching name wins).
+- **CMDB**: the hosts and stacks (CIs) with open incidents or problems, rated like the areas.
+- **Risks**: open problems and changes (not Applied, not standard changes) ranked by a score made of
   priority, security area, an internet-facing CI, age, and open incidents on a problem. The weights are
   `RISK_*` in `app/model.py`, and the "Why" column shows each record's breakdown, so they're easy to tune.
-- **In flight**: changes awaiting approval, at Accepted/Testing/Qualification, or Applied but not closed;
-  projects with progress and linked records; recurring changes by next creation date.
 
-**Every number is a link** (`#list=<key>`) to the list of records behind it, each opening in GLPI. The
-number is computed as the length of that list, so the two can't disagree. Lists can be bookmarked.
+Each kind of record has its own colour, used the same way everywhere: incidents blue, requests teal, problems
+orange, changes green and projects violet. Tiles that flag an issue across kinds (High priority, and record
+quality checks such as No CI) are red; one that is about a single kind (e.g. Orphan problems) keeps that
+kind's colour. It shows as a tile's light tint,
+edge and number, a dot by each In flight group, a tinted reference chip in every list, and the incident, problem and
+change counts on area cards and in the CMDB table. The kind is always written out too, so colour is never
+the only cue, and every colour meets WCAG AA contrast in both light and dark themes. A tile with nothing in
+it is dimmed: no fill, a dashed grey border and a grey number.
+
+**Every number is a link** (`#list=<key>`) to the list behind it, each entry opening in GLPI. The number is
+computed as the length of that list, so the two can't disagree. Lists can be bookmarked. Record lists show
+when each record was opened and last updated.
+
+Every table sorts by any column: click a header, and click again to reverse. Tables show 10 rows, with
+**Show more** and **Show all** below, and **Show less** to go back to 10. Escape, ✕ or a click outside a list closes it.
 
 "Internet-facing" comes from GLPI's impact graph: the CIs impacted by `INTERNET_FACING_ROOTS` (typically your
 reverse proxy), plus the CIs named in `INTERNET_FACING_EXTRA` (e.g. the firewall).
@@ -34,13 +60,14 @@ serves the snapshot at `/api/snapshot`, along with the static page (`app/static/
   (`MANUAL_MIN_SECONDS`). A click during a running refresh waits for it.
 
 It uses the **GLPI v1 API only** (`app/glpi.py`), because v2 has no endpoints for the links between records
-and CIs or projects. A refresh makes about 20 calls.
+and CIs or projects. A refresh makes about 30 calls.
 
 ## GLPI setup
 
 - **A user, e.g. `dashboard`, on the Standard interface.** The Simplified interface hides most rights. Give
   it a read-only profile with these rights:
-  - see all tickets, problems and changes, recurring changes and projects;
+  - see all tickets, problems and changes (including who and which group they're assigned to), recurring
+    changes and projects;
   - assets (computers, network devices, appliances, clusters, peripherals);
   - dropdowns (ITIL categories, project states);
   - impact analysis.

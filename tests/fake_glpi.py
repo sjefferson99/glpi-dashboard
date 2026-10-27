@@ -20,13 +20,16 @@ ROOTS = ["reverse-proxy"]
 EXTRA = ["firewall"]
 
 
+PLAN = {f: "<p>Written</p>" for f in ("impactcontent", "rolloutplancontent", "backoutplancontent", "checklistcontent")}
+
+
 def _d(days):
     return (NOW - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _itil(id_, name, status, priority, cat, days, **extra):
     return {"id": id_, "name": name, "status": status, "priority": priority, "urgency": priority,
-            "impact": priority, "itilcategories_id": cat, "date": _d(days), **extra}
+            "impact": priority, "itilcategories_id": cat, "date": _d(days), "date_mod": _d(days // 2), **extra}
 
 
 def dataset():
@@ -51,9 +54,10 @@ def dataset():
             _itil(2, "Closed problem", 6, 4, 3, 30),
         ],
         "Change": [
-            _itil(1, "Renew wildcard certificate", 10, 4, 1, 5, global_validation=2),
-            _itil(2, "Firewall rule review", 7, 3, 3, 200, global_validation=3),
-            _itil(3, "Patch db1", 5, 2, 3, 20, global_validation=3),
+            _itil(1, "Renew wildcard certificate", 10, 4, 1, 5, global_validation=2, **PLAN),
+            _itil(2, "Firewall rule review", 7, 3, 3, 200, global_validation=3,
+                  **{**PLAN, "backoutplancontent": "&lt;p&gt;&amp;nbsp;&lt;/p&gt;"}),   # empty, as GLPI encodes it
+            _itil(3, "Patch db1", 5, 2, 3, 20, global_validation=3, **PLAN),
             _itil(4, "Monthly patching", 1, 3, 4, 4, global_validation=1),
             _itil(5, "Cancelled change", 14, 3, 3, 50, global_validation=1),
         ],
@@ -71,6 +75,17 @@ def dataset():
             {"id": 1, "problems_id": 1, "tickets_id": 1},
             {"id": 2, "problems_id": 1, "tickets_id": 4},
         ],
+        "Change_Problem": [{"id": 1, "changes_id": 1, "problems_id": 1}],
+        # Actor links: type 1 requester, 2 assigned, 3 observer.
+        "Ticket_User": [
+            {"id": 1, "tickets_id": 1, "users_id": 2, "type": 2},
+            {"id": 2, "tickets_id": 2, "users_id": 2, "type": 1},
+        ],
+        "Group_Ticket": [{"id": 1, "tickets_id": 5, "groups_id": 1, "type": 2}],
+        "Problem_User": [{"id": 1, "problems_id": 1, "users_id": 2, "type": 2}],
+        "Group_Problem": [],
+        "Change_User": [{"id": 1, "changes_id": 1, "users_id": 2, "type": 2}],
+        "Change_Group": [{"id": 1, "changes_id": 2, "groups_id": 1, "type": 2}],
         "RecurrentChange": [
             {"id": 1, "name": "Monthly patching", "is_active": 1, "periodicity": "1MONTH",
              "next_creation_date": "2026-11-01 00:00:00", "create_before": 2 * 86400},

@@ -12,55 +12,54 @@
   <header class="top">
     <h1><img src="logo.svg" alt="" class="logo">Network state</h1>
     <p class="meta"><span id="updated">Loading…</span> · from <a id="glpi-link" href="#" target="_blank" rel="noopener">GLPI</a>
-      <button id="refresh" type="button">Refresh now</button></p>
+      <button id="refresh" class="btn" type="button">Refresh now</button></p>
   </header>
   <div id="error" class="banner" role="alert" hidden></div>
 
   <main>
-    <section aria-labelledby="h-summary">
-      <h2 id="h-summary" class="visually-hidden">Summary</h2>
-      <div id="summary" class="tiles"></div>
-    </section>
+    <div class="tabs" role="tablist" aria-label="Dashboard sections">
+      <button type="button" role="tab" id="tab-summary" aria-controls="panel-summary">Summary</button>
+      <button type="button" role="tab" id="tab-flight" aria-controls="panel-flight">In flight</button>
+      <button type="button" role="tab" id="tab-recurring" aria-controls="panel-recurring">Recurring changes</button>
+      <button type="button" role="tab" id="tab-cmdb" aria-controls="panel-cmdb">CMDB</button>
+      <button type="button" role="tab" id="tab-risks" aria-controls="panel-risks">Risks</button>
+    </div>
 
-    <section aria-labelledby="h-health">
+    <section id="panel-summary" role="tabpanel" aria-labelledby="tab-summary" tabindex="0">
+      <div id="summary" class="tiles"></div>
+      <h2 id="h-quality">Record quality</h2>
+      <p class="hint">Open records missing something the GLPI working rules ask for.</p>
+      <div id="quality" class="tiles"></div>
       <h2 id="h-health">Health at a glance</h2>
       <p class="hint">Open incidents and problems by area.
         <span class="rag"><span class="rag-icon rag-red" aria-hidden="true">■</span> Act</span> any High or above ·
         <span class="rag"><span class="rag-icon rag-amber" aria-hidden="true">▲</span> Watch</span> any incident or Medium problem ·
         <span class="rag"><span class="rag-icon rag-green" aria-hidden="true">●</span> OK</span> otherwise.</p>
       <div id="areas" class="cards"></div>
-      <details id="cis-box">
-        <summary>Hosts and stacks with open issues (<span id="cis-count">0</span>)</summary>
-        <div class="scroll"><table id="cis" class="grid">
-          <thead><tr><th>CI</th><th>State</th><th class="n">Incidents</th><th class="n">Problems</th><th class="n">Changes</th></tr></thead>
-          <tbody></tbody>
-        </table></div>
-      </details>
     </section>
 
-    <section aria-labelledby="h-risks">
+    <section id="panel-flight" role="tabpanel" aria-labelledby="tab-flight" tabindex="0" hidden>
+      <div id="flight"></div>
+    </section>
+
+    <section id="panel-recurring" role="tabpanel" aria-labelledby="tab-recurring" tabindex="0" hidden>
+      <h2 id="h-recurring-open">Open changes by recurring change</h2>
+      <p class="hint">Open changes whose title starts with an active recurring change's name.</p>
+      <div id="recurring-cards" class="cards"></div>
+      <h2 id="h-recurring">Schedule</h2>
+      <div class="scroll"><table id="recurring" class="grid" aria-labelledby="h-recurring"><tbody></tbody></table></div>
+    </section>
+
+    <section id="panel-cmdb" role="tabpanel" aria-labelledby="tab-cmdb" tabindex="0" hidden>
+      <h2 id="h-cis">Hosts and stacks with open issues (<span id="cis-count">0</span>)</h2>
+      <div class="scroll"><table id="cis" class="grid" aria-labelledby="h-cis"><tbody></tbody></table></div>
+    </section>
+
+    <section id="panel-risks" role="tabpanel" aria-labelledby="tab-risks" tabindex="0" hidden>
       <h2 id="h-risks">Ranked risks</h2>
       <p class="hint">Open problems and changes (not Applied, not standard changes) by score: priority, security area,
         internet-facing CI, age, open incidents. <a id="risks-all" href="#list=risks-all">All <span></span> ranked</a></p>
-      <div class="scroll"><table id="risks" class="grid">
-        <thead><tr><th class="n">#</th><th>Record</th><th>Priority</th><th>Area</th><th class="n">Score</th><th>Why</th></tr></thead>
-        <tbody></tbody>
-      </table></div>
-    </section>
-
-    <section aria-labelledby="h-flight">
-      <h2 id="h-flight">In flight</h2>
-      <div id="flight" class="tiles"></div>
-      <h3>Projects</h3>
-      <div class="scroll"><table id="projects" class="grid">
-        <thead><tr><th>Project</th><th>State</th><th>Progress</th><th class="n">Open records</th><th class="n">All records</th></tr></thead>
-        <tbody></tbody>
-      </table></div>
-      <h3>Recurring changes</h3>
-      <div class="scroll"><table id="recurring" class="grid">
-        <thead><tr><th>Recurring change</th><th>Every</th><th>Next created</th><th>Due</th></tr></thead>
-        <tbody></tbody>
-      </table></div>
+      <div class="scroll"><table id="risks" class="grid" aria-labelledby="h-risks"><tbody></tbody></table></div>
     </section>
   </main>
 
@@ -70,10 +69,7 @@
       <a href="#" class="close" aria-label="Close list">✕</a>
     </div>
     <p id="list-count" class="meta"></p>
-    <div class="scroll"><table class="grid">
-      <thead><tr><th>Record</th><th>Title</th><th>Status</th><th>Priority</th><th class="n">Age</th><th>CIs</th></tr></thead>
-      <tbody id="list-rows"></tbody>
-    </table></div>
+    <div class="scroll"><table class="grid" aria-labelledby="list-title"><tbody id="list-rows"></tbody></table></div>
   </dialog>
 </body>
 </html>

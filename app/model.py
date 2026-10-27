@@ -5,6 +5,7 @@ clicking it shows that list, so a count and the records behind it can never
 disagree. Statuses are GLPI's own. Areas are the top level of the ITIL category
 tree. The ranked-risk weighting is ``RISK_*`` below.
 """
+import html
 import re
 from datetime import datetime, timedelta
 
@@ -27,6 +28,18 @@ VALIDATION_WAITING = 2           # Change.global_validation: 1 none, 2 waiting, 
 STANDARD_CHANGE_AREA = "Standard change"
 SECURITY_AREA = "Security"
 
+# Record quality: what the GLPI working rules expect every open record to have.
+STALE_DAYS = 30
+VALIDATION_NONE = 1
+CHANGE_NEW = 1
+CHANGE_PLAN_FIELDS = {"impactcontent": "Impacts", "rolloutplancontent": "Deployment plan",
+                      "backoutplancontent": "Backup plan", "checklistcontent": "Checklist"}
+ACTOR_ASSIGNED = 2                         # actor link type: 1 requester, 2 assigned, 3 observer
+ACTORS = {"Ticket": (("Ticket_User", "tickets_id"), ("Group_Ticket", "tickets_id")),
+          "Problem": (("Problem_User", "problems_id"), ("Group_Problem", "problems_id")),
+          "Change": (("Change_User", "changes_id"), ("Change_Group", "changes_id"))}
+TAG = re.compile(r"<[^>]*>")
+
 # Ranked risks: points per priority, plus flat bonuses, plus age (linear to RISK_AGE_DAYS).
 RISK_PRIORITY = {1: 0, 2: 10, 3: 25, 4: 45, 5: 70, 6: 90}
 RISK_SECURITY = 15
@@ -42,6 +55,16 @@ PLAIN_ITEMTYPE = re.compile(r"[A-Za-z_]+")
 def _date(s):
     """Parses a GLPI ``YYYY-MM-DD HH:MM:SS`` timestamp; ``None`` or empty gives ``None``."""
     return datetime.fromisoformat(s.replace(" ", "T")) if s else None
+
+
+def _blank(html_text):
+    """Says whether a GLPI rich-text field has no visible text.
+
+    GLPI may return the HTML entity-encoded (``&lt;p&gt;``), so it's decoded before and after
+    the tags are dropped; an empty editor leaves ``<p>&nbsp;</p>``.
+    """
+    text = TAG.sub("", html.unescape(html_text or ""))
+    return not html.unescape(text).replace("\xa0", " ").strip()
 
 
 def _rag(items):
@@ -127,6 +150,21 @@ class Builder:
         self.lists[key] = {"title": title, "refs": keys}
         return len(keys)
 
+    def add_table(self, key, title, kind, rows):
+        """Registers a drill-down list of non-record rows, such as projects.
+
+        Args:
+            key: The list's id, used in ``#list=<key>`` links.
+            title: The heading shown above the list.
+            kind: Which columns the page shows, e.g. ``"projects"``.
+            rows: The rows, in the order to show them.
+
+        Returns:
+            The number of rows, which is the count to show.
+        """
+        self.lists[key] = {"title": title, "kind": kind, "rows": rows}
+        return len(rows)
+
     # --- records -----------------------------------------------------------------
 
     def build_records(self):
@@ -137,6 +175,8 @@ class Builder:
         done = {"Ticket": TICKET_DONE, "Problem": PROBLEM_DONE, "Change": CHANGE_DONE}
         status = {"Ticket": TICKET_STATUS, "Problem": PROBLEM_STATUS, "Change": CHANGE_STATUS}
         for itemtype in ("Ticket", "Problem", "Change"):
+            assigned = {row[id_field] for table, id_field in ACTORS[itemtype] for row in self.d[table]
+                        if row.get("type") == ACTOR_ASSIGNED}
             for r in self.d[itemtype]:
                 if itemtype == "Ticket":
                     kind = "Incident" if r.get("type") == 1 else "Request"
@@ -144,6 +184,7 @@ class Builder:
                     kind = itemtype
                 category = self.category.get(r["itilcategories_id"], "")
                 opened = _date(r["date"]) or self.now
+                updated = _date(r.get("date_mod"))
                 cis = links[itemtype].get(r["id"], [])
                 key = f"{itemtype}:{r['id']}"
                 self.records[key] = {
@@ -155,10 +196,15 @@ class Builder:
                     "urgency": r["urgency"], "impact": r["impact"],
                     "category": category, "area": category.split(" > ")[0] if category else "Uncategorised",
                     "date": opened.date().isoformat(), "age_days": max((self.now - opened).days, 0),
+                    "updated": updated.date().isoformat() if updated else None,
                     "url": f"{self.url}/front/{FORM[itemtype]}.form.php?id={r['id']}",
                     "cis": [{"name": self.ci_names.get(k, f"{k[0]} #{k[1]}"), "url": self.ci_url(*k),
                              "internet": k in self.internet} for k in cis],
                     "_ci_keys": cis,
+                    "_assigned": r["id"] in assigned,
+                    "_idle_days": max((self.now - (updated or opened)).days, 0),
+                    "_empty_plan": [label for f, label in CHANGE_PLAN_FIELDS.items() if _blank(r.get(f))]
+                    if itemtype == "Change" else [],
                 }
 
     def open_of(self, *kinds):
@@ -168,21 +214,63 @@ class Builder:
     # --- views -------------------------------------------------------------------
 
     def summary(self):
-        """Returns the summary tiles: open records by kind, high priority, uncategorised."""
+        """Returns the summary tiles: open records by kind and high priority."""
         R = self.records
         changes = [k for k in self.open_of("Change") if R[k]["status_id"] != CHANGE_APPLIED]
         everything = self.open_of("Incident", "Request", "Problem", "Change")
         tiles = [
-            ("open-incidents", "Open incidents", self.open_of("Incident")),
-            ("open-requests", "Open requests", self.open_of("Request")),
-            ("open-problems", "Open problems", self.open_of("Problem")),
-            ("open-changes", "Open changes (not yet Applied)", changes),
-            ("high-priority", "High priority or above, open", [k for k in everything if R[k]["priority"] >= 4]),
-            ("no-category", "Open records without a category",
-             [k for k in everything if not R[k]["category"]]),
+            ("open-incidents", "incident", "Open incidents", self.open_of("Incident")),
+            ("open-requests", "request", "Open requests", self.open_of("Request")),
+            ("open-problems", "problem", "Open problems", self.open_of("Problem")),
+            ("open-changes", "change", "Open changes (not yet Applied)", changes),
+            ("high-priority", "issue", "High priority or above, open",
+             [k for k in everything if R[k]["priority"] >= 4]),
         ]
-        return [{"key": key, "title": title, "count": self.add_list(key, title, keys)}
-                for key, title, keys in tiles]
+        return [{"key": key, "kind": kind, "title": title, "count": self.add_list(key, title, keys)}
+                for key, kind, title, keys in tiles]
+
+    def quality(self):
+        """Returns the record-quality tiles: open records missing what the GLPI working rules ask for.
+
+        Each tile has a short ``label``, a ``title`` for its list, and the full rule in ``detail``.
+        Requests often have no CI, so only incidents, problems and changes need one. The change
+        checks skip standard changes, which need no approval or plan. Only changes still in New
+        are checked for an approval request, since older changes predate the rule.
+        """
+        R = self.records
+        everything = self.open_of("Incident", "Request", "Problem", "Change")
+        linked_problems = ({row["problems_id"] for row in self.d["Problem_Ticket"]}
+                           | {row["problems_id"] for row in self.d["Change_Problem"]})
+        changes = [k for k in self.open_of("Change") if R[k]["area"] != STANDARD_CHANGE_AREA]
+        validation = {c["id"]: c.get("global_validation") for c in self.d["Change"]}
+        tiles = [
+            ("no-category", "issue", "No category", "Open records without a category",
+             "Open incidents, requests, problems and changes with no ITIL category.",
+             [k for k in everything if not R[k]["category"]]),
+            ("no-ci", "issue", "No CI", "Open incidents, problems and changes without a CI",
+             "Open incidents, problems and changes not linked to any CI. Requests are left out: they often have none.",
+             [k for k in self.open_of("Incident", "Problem", "Change") if not R[k]["_ci_keys"]]),
+            ("unassigned", "issue", "Unassigned", "Open records with no one assigned",
+             "Open records with no technician or group assigned. Requesters and observers don't count.",
+             [k for k in everything if not R[k]["_assigned"]]),
+            ("stale", "issue", f"Stale ({STALE_DAYS} d)", f"Open records not updated in {STALE_DAYS} days",
+             f"Open records with no update in the last {STALE_DAYS} days.",
+             [k for k in everything if R[k]["_idle_days"] > STALE_DAYS]),
+            ("orphan-problems", "problem", "Orphan problems", "Open problems linked to no incident and no change",
+             "Open problems not linked to any incident or change.",
+             [k for k in self.open_of("Problem") if R[k]["id"] not in linked_problems]),
+            ("no-approval", "change", "No approval asked", "Changes in New with no approval requested",
+             "Changes in New, other than standard changes, with no approval requested.",
+             [k for k in changes if R[k]["status_id"] == CHANGE_NEW
+              and validation.get(R[k]["id"]) == VALIDATION_NONE]),
+            ("empty-plan", "change", "Plan incomplete", "Open changes with an empty plan field",
+             "Open changes, other than standard changes, with an empty Impacts, Deployment plan, Backup plan "
+             "or Checklist.",
+             [k for k in changes if R[k]["_empty_plan"]]),
+        ]
+        return [{"key": key, "kind": kind, "label": label, "title": title, "detail": detail,
+                 "count": self.add_list(key, title, keys)}
+                for key, kind, label, title, detail, keys in tiles]
 
     def health(self):
         """Returns open incidents and problems per area and per CI, each rated red/amber/green."""
@@ -269,32 +357,73 @@ class Builder:
                                    "refs": [s["key"] for s in scored]}
         return {"top": scored[:RISK_TOP], "total": len(scored), "list": "risks-all"}
 
-    def in_flight(self):
-        """Returns change tiles by stage, active recurring changes, and projects with linked records."""
+    def recurring(self):
+        """Returns the active recurring changes, each with the open changes made from it.
+
+        GLPI v1 doesn't link a change back to the recurring change that created it, so a change
+        belongs to the recurring change its title starts with (ignoring case), the longest name
+        winning if several match.
+        """
         R = self.records
+        active = [rc for rc in self.d["RecurrentChange"] if rc.get("is_active") and (rc.get("name") or "").strip()]
+        longest_first = sorted(active, key=lambda rc: -len(rc["name"].strip()))
+        made_by = {rc["id"]: [] for rc in active}
+        for k in self.open_of("Change"):
+            title = (R[k]["name"] or "").casefold()
+            rc = next((rc for rc in longest_first if title.startswith(rc["name"].strip().casefold())), None)
+            if rc:
+                made_by[rc["id"]].append(k)
+        out = []
+        for rc in active:
+            nxt = _date(rc.get("next_creation_date"))
+            due = nxt + timedelta(seconds=int(rc.get("create_before") or 0)) if nxt else None
+            key = f"recurring-{rc['id']}-open"
+            out.append({"name": rc["name"], "periodicity": rc.get("periodicity") or "",
+                        "next_creation": nxt.date().isoformat() if nxt else None,
+                        "due": due.date().isoformat() if due else None,
+                        "url": f"{self.url}/front/recurrentchange.form.php?id={rc['id']}",
+                        "open": self.add_list(key, f"{rc['name']}: open changes", made_by[rc["id"]]),
+                        "open_list": key})
+        out.sort(key=lambda r: r["next_creation"] or "9999")
+        return out
+
+    def _status_tiles(self, kind, label, statuses, done):
+        """Returns one tile per open status of a kind, keyed ``<label>-<status>``."""
+        R = self.records
+        tiles = []
+        for sid, name in statuses.items():
+            if sid in done:
+                continue
+            key = f"{label.lower()}-{re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')}"
+            title = f"{label}: {name}"
+            keys = [k for k in self.open_of(kind) if R[k]["status_id"] == sid]
+            tiles.append({"key": key, "kind": kind.lower(), "title": title, "label": name,
+                          "count": self.add_list(key, title, keys)})
+        return tiles
+
+    def in_flight(self):
+        """Returns the in-flight tiles in groups: each record kind by status, then projects."""
+        R = self.records
+        groups = [{"title": label, "kind": kind.lower(), "tiles": self._status_tiles(kind, label, statuses, done)}
+                  for kind, label, statuses, done in (("Incident", "Incidents", TICKET_STATUS, TICKET_DONE),
+                                                      ("Request", "Requests", TICKET_STATUS, TICKET_DONE),
+                                                      ("Problem", "Problems", PROBLEM_STATUS, PROBLEM_DONE))]
+
         waiting = {c["id"] for c in self.d["Change"] if c.get("global_validation") == VALIDATION_WAITING}
         approval = [k for k in self.open_of("Change") if R[k]["id"] in waiting
                     and R[k]["status_id"] != CHANGE_APPLIED]
-        tiles = [{"key": "awaiting-approval", "title": "Changes awaiting approval",
+        tiles = [{"key": "awaiting-approval", "kind": "change", "title": "Changes awaiting approval",
+                  "label": "Awaiting approval",
                   "count": self.add_list("awaiting-approval", "Changes awaiting approval", approval)}]
         for sid in CHANGE_WORKING + (CHANGE_APPLIED,):
             name = CHANGE_STATUS[sid]
             title = "Changes Applied - to close" if sid == CHANGE_APPLIED else f"Changes at {name}"
+            label = "Applied - to close" if sid == CHANGE_APPLIED else name
             key = f"changes-{name.lower()}"
             keys = [k for k in self.open_of("Change") if R[k]["status_id"] == sid]
-            tiles.append({"key": key, "title": title, "count": self.add_list(key, title, keys)})
-
-        recurring = []
-        for rc in self.d["RecurrentChange"]:
-            if not rc.get("is_active"):
-                continue
-            nxt = _date(rc.get("next_creation_date"))
-            due = nxt + timedelta(seconds=int(rc.get("create_before") or 0)) if nxt else None
-            recurring.append({"name": rc["name"], "periodicity": rc.get("periodicity") or "",
-                              "next_creation": nxt.date().isoformat() if nxt else None,
-                              "due": due.date().isoformat() if due else None,
-                              "url": f"{self.url}/front/recurrentchange.form.php?id={rc['id']}"})
-        recurring.sort(key=lambda r: r["next_creation"] or "9999")
+            tiles.append({"key": key, "kind": "change", "title": title, "label": label,
+                          "count": self.add_list(key, title, keys)})
+        groups.append({"title": "Changes", "kind": "change", "tiles": tiles})
 
         states = {s["id"]: s["name"] for s in self.d["ProjectState"]}
         linked = {}
@@ -317,14 +446,18 @@ class Builder:
                 "total_list": f"project-{p['id']}-all",
             })
         projects.sort(key=lambda p: p["name"])
-        return {"tiles": tiles, "recurring": recurring, "projects": projects}
+        groups.append({"title": "Projects", "kind": "project", "tiles": [
+            {"key": "projects", "kind": "project", "title": "Projects", "label": "Projects",
+             "count": self.add_table("projects", "Projects", "projects", projects)}]})
+        return {"groups": groups}
 
     def build(self):
         """Builds every view; only records some list refers to are sent."""
         self.build_records()
-        view = {"summary": self.summary(), "health": self.health(),
+        view = {"summary": self.summary(), "quality": self.quality(),
+                "health": {**self.health(), "recurring": self.recurring()},
                 "risks": self.risks(), "in_flight": self.in_flight()}
-        used = {k for lst in self.lists.values() for k in lst["refs"]}
+        used = {k for lst in self.lists.values() for k in lst.get("refs", ())}
         records = {k: {f: v for f, v in r.items() if not f.startswith("_")}
                    for k, r in self.records.items() if k in used}
         return {**view, "lists": self.lists, "records": records, "glpi_url": self.url}
@@ -341,7 +474,7 @@ def build(data, now, glpi_url, internet_roots=(), internet_extra=()):
         internet_extra: Further CI names that count as internet-facing.
 
     Returns:
-        A JSON-ready dict: ``summary``, ``health``, ``risks``, ``in_flight``, ``lists``, ``records``
+        A JSON-ready dict: ``summary``, ``quality``, ``health``, ``risks``, ``in_flight``, ``lists``, ``records``
         and ``glpi_url``.
     """
     return Builder(data, now, glpi_url, internet_roots, internet_extra).build()
