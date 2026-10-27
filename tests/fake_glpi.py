@@ -44,9 +44,10 @@ def dataset():
         ],
         "Ticket": [
             _itil(1, "Certificate expired on web1", 2, 4, 2, 10, type=1),
-            _itil(2, "db1 slow", 1, 2, 3, 3, type=1),
+            _itil(2, "db1 slow", 1, 2, 3, 3, type=1,
+                  content="&lt;p&gt;Queries time out during the nightly &lt;b&gt;backup&lt;/b&gt; job.&lt;/p&gt;"),
             _itil(3, "New user account", 1, 3, 0, 1, type=2),
-            _itil(4, "Old outage", 6, 5, 3, 100, type=1),
+            _itil(4, "Old outage", 6, 5, 3, 100, type=1, content="<p>Backup storage full</p>"),
             _itil(5, "Uncategorised blip", 4, 3, 0, 2, type=1),
         ],
         "Problem": [
@@ -105,7 +106,9 @@ def dataset():
         ],
         "ImpactRelation": [{"id": 1, "itemtype_source": "Appliance", "items_id_source": 1,
                             "itemtype_impacted": "Computer", "items_id_impacted": 1}],
-        "Computer": [{"id": 1, "name": "web1"}, {"id": 2, "name": "db1"}, {"id": 3, "name": "firewall"}],
+        "Computer": [{"id": 1, "name": "web1", "serial": "SN-WEB-001"}, {"id": 2, "name": "db1"},
+                     {"id": 3, "name": "firewall", "comment": "Edge filtering"},
+                     {"id": 4, "name": "template-server", "is_template": 1}],
         "Appliance": [{"id": 1, "name": "reverse-proxy"}],
     }
 

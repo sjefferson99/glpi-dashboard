@@ -50,6 +50,11 @@ RISK_PER_INCIDENT, RISK_INCIDENTS_MAX = 5, 15
 FORM = {"Ticket": "ticket", "Problem": "problem", "Change": "change"}
 PLAIN_ITEMTYPE = re.compile(r"[A-Za-z_]+")
 
+# Search: a query needs this many characters; at most SEARCH_LIMIT matches are sent, with the total.
+SEARCH_MIN, SEARCH_MAX, SEARCH_LIMIT = 2, 100, 100
+SNIPPET_BEFORE, SNIPPET_AFTER = 60, 140
+SPACE = re.compile(r"\s+")
+
 
 def _date(s):
     """Parses a GLPI ``YYYY-MM-DD HH:MM:SS`` timestamp; ``None`` or empty gives ``None``."""
@@ -64,6 +69,22 @@ def _blank(html_text):
     """
     text = TAG.sub("", html.unescape(html_text or ""))
     return not html.unescape(text).replace("\xa0", " ").strip()
+
+
+def _plain(html_text):
+    """Returns a GLPI rich-text field as one line of plain text, decoded as ``_blank()`` does."""
+    text = TAG.sub(" ", html.unescape(html_text or ""))
+    return SPACE.sub(" ", html.unescape(text).replace("\xa0", " ")).strip()
+
+
+def _snippet(text, terms):
+    """Returns the part of ``text`` around the first of ``terms`` found in it, or ``""`` if none is."""
+    found = [m.start() for t in terms if (m := re.search(re.escape(t), text, re.IGNORECASE))]
+    if not found:
+        return ""
+    at = min(found)
+    start, end = max(at - SNIPPET_BEFORE, 0), min(at + SNIPPET_AFTER, len(text))
+    return ("…" if start else "") + text[start:end].strip() + ("…" if end < len(text) else "")
 
 
 def _rag(items):
@@ -205,6 +226,7 @@ class Builder:
                     "_ci_keys": cis,
                     "_assigned": r["id"] in assigned,
                     "_idle_days": max((self.now - (updated or opened)).days, 0),
+                    "_text": _plain(r.get("content")),
                     "_empty_plan": [label for f, label in CHANGE_PLAN_FIELDS.items() if _blank(r.get(f))]
                     if itemtype == "Change" else [],
                 }
@@ -489,6 +511,77 @@ class Builder:
         records = {k: {f: v for f, v in r.items() if not f.startswith("_")}
                    for k, r in self.records.items() if k in used}
         return {**view, "lists": self.lists, "records": records, "glpi_url": self.url}
+
+    def search_index(self):
+        """Returns everything a search looks through: each ticket, problem and change (closed too), project and CI.
+
+        Call it after ``build()``. Only CIs of the types ``main.collect()`` read are included: those linked to a
+        record or in the impact graph.
+
+        Returns:
+            Entries as ``search()`` shows them, each with ``_hay``, the case-folded text searched; ``_text``, the
+            description as plain text, for snippets; and ``_tag``, its ``#id``, which ranks an exact id first.
+        """
+        def entry(fields, text, *more):
+            hay = " ".join([fields["ref"], fields["name"], fields["category"], fields["status"], *more, text])
+            return {**fields, "_hay": hay.casefold(), "_text": text, "_tag": "#" + fields["ref"].rsplit("#", 1)[-1]}
+
+        out = []
+        for r in self.records.values():
+            fields = {f: r[f] for f in ("kind", "ref", "name", "status", "category", "date", "updated", "open", "url")}
+            out.append(entry({**fields, "name": r["name"] or ""}, r["_text"], *(c["name"] for c in r["cis"])))
+        states = {s["id"]: s["name"] for s in self.d["ProjectState"]}
+        for p in self.d["Project"]:
+            date, updated = _date(p.get("date")), _date(p.get("date_mod"))
+            out.append(entry({"kind": "Project", "ref": f"Project #{p['id']}", "name": p["name"] or "",
+                              "status": states.get(p["projectstates_id"], ""), "category": p.get("code") or "",
+                              "date": date.date().isoformat() if date else None,
+                              "updated": updated.date().isoformat() if updated else None, "open": None,
+                              "url": f"{self.url}/front/project.form.php?id={p['id']}"}, _plain(p.get("content"))))
+        for itemtype, rows in self.d["cis"].items():
+            label = itemtype.rsplit("\\", 1)[-1]    # GLPI 11 custom assets are namespaced
+            for c in rows:
+                if c.get("is_template"):
+                    continue
+                updated = _date(c.get("date_mod"))
+                out.append(entry({"kind": "CI", "ref": f"{label} #{c['id']}", "name": c.get("name") or "",
+                                  "status": "", "category": label, "date": None,
+                                  "updated": updated.date().isoformat() if updated else None, "open": None,
+                                  "url": self.ci_url(itemtype, c["id"])}, _plain(c.get("comment")),
+                                 str(c.get("serial") or ""), str(c.get("otherserial") or "")))
+        return out
+
+
+def search(index, query, closed=False, limit=SEARCH_LIMIT):
+    """Finds the entries that contain every word of a query, best first.
+
+    Matching is by substring, ignoring case, over the reference, title, category, status, linked CI names
+    (and a CI's serial and inventory numbers) and description. An exact ``#id`` comes first, then entries
+    whose title has every word, then anything but a closed record, each most recently updated first.
+
+    Args:
+        index: Entries from ``Builder.search_index()``.
+        query: What was typed. Shorter than ``SEARCH_MIN`` once trimmed, it matches nothing.
+        closed: Include closed records. Projects and CIs are always included.
+        limit: The most results to return.
+
+    Returns:
+        ``query``, the ``total`` number of matches, and the first ``limit`` of them as ``results``. A result
+        whose title lacks a word has a ``snippet`` of its description around the first word found there.
+    """
+    terms = query.casefold().split()
+    if len(query.strip()) < SEARCH_MIN:
+        return {"query": query, "total": 0, "results": []}
+    hits = [e for e in index if (closed or e["open"] is not False) and all(t in e["_hay"] for t in terms)]
+    hits.sort(key=lambda e: e["updated"] or e["date"] or "", reverse=True)
+    hits.sort(key=lambda e: (e["_tag"] not in terms, not all(t in e["name"].casefold() for t in terms),
+                             e["open"] is False))
+    results = []
+    for e in hits[:limit]:
+        missing = [t for t in terms if t not in e["name"].casefold()]
+        results.append({**{f: v for f, v in e.items() if not f.startswith("_")},
+                        "snippet": _snippet(e["_text"], missing) if missing else ""})
+    return {"query": query, "total": len(hits), "results": results}
 
 
 def build(data, now, glpi_url, internet_roots=(), internet_extra=()):

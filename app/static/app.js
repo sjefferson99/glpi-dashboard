@@ -41,7 +41,7 @@ const listLink = (key, count, cls) => el('a', { href: '#list=' + encodeURICompon
 const rag = (r) => el('span', { class: 'rag' },
   el('span', { class: 'rag-icon rag-' + r, 'aria-hidden': 'true', text: RAG[r][0] }), ' ' + RAG[r][1]);
 
-const KINDS = new Set(['incident', 'request', 'problem', 'change', 'project', 'issue']);
+const KINDS = new Set(['incident', 'request', 'problem', 'change', 'project', 'issue', 'ci']);
 /**
  * The class that colours an element by record kind (see --k-* in style.css); unknown kinds get none.
  * @param {string} kind e.g. 'Incident' or 'change'
@@ -147,6 +147,42 @@ const RISK_COLUMNS = [
   { label: 'Opened', cell: (r) => el('td', { class: 'nowrap', text: r.date }), sort: (r) => r.date },
   { label: 'Score', num: true, cell: (r) => el('td', { class: 'n', text: String(r.risk.score) }), sort: (r) => r.risk.score },
   { label: 'Why', cell: (r) => el('td', { class: 'why', text: r.risk.why.join(' · ') }) },
+];
+
+/**
+ * Text with each search word marked, built from text nodes and <mark>s, never HTML.
+ * @param {string} text
+ * @param {Array<string>} words lower case
+ * @returns {DocumentFragment}
+ */
+function marked(text, words) {
+  const frag = document.createDocumentFragment();
+  if (!words.length) { frag.append(text); return frag; }
+  const re = new RegExp(words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'gi');
+  let at = 0;
+  for (const m of text.matchAll(re)) {
+    frag.append(text.slice(at, m.index), el('mark', { text: m[0] }));
+    at = m.index + m[0].length;
+  }
+  frag.append(text.slice(at));
+  return frag;
+}
+
+// The words of the search being shown, for marking them in its results.
+let searchWords = [];
+
+// Rows are search results: records, projects and CIs, best match first.
+const SEARCH_COLUMNS = [
+  { label: 'Record', cell: (r) => el('td', {}, recordLink(r)), sort: (r) => r.ref },
+  { label: 'Title', sort: (r) => r.name, cell: (r) => {
+    const a = glpiLink(r.url, '');
+    a.append(marked(r.name, searchWords));
+    return el('td', {}, a);
+  } },
+  { label: 'Status', cell: (r) => el('td', { class: 'nowrap', text: r.status || '-' }), sort: (r) => r.status },
+  { label: 'Category / type', cell: (r) => el('td', { text: r.category || '-' }), sort: (r) => r.category },
+  { label: 'Updated', cell: (r) => el('td', { class: 'nowrap', text: r.updated || r.date || '-' }), sort: (r) => r.updated || r.date },
+  { label: 'Found in description', cell: (r) => el('td', { class: 'snippet' }, marked(r.snippet, searchWords)) },
 ];
 
 const LIST_KINDS = {
@@ -445,6 +481,13 @@ function render() {
  */
 function showList() {
   const dlg = document.getElementById('list');
+  const s = location.hash.match(/^#search=([^&]*)(&closed=1)?$/);
+  if (s) {
+    let q = null;
+    try { q = decodeURIComponent(s[1]); } catch { q = null; }
+    if (q !== null) { showSearch(q, Boolean(s[2])); return; }
+  }
+  setSearchMode(false);
   const m = location.hash.match(/^#list=(.+)$/);
   let key = null;
   try { key = m && decodeURIComponent(m[1]); } catch { key = null; }
@@ -462,9 +505,141 @@ function showList() {
   if (!dlg.open) dlg.showModal();
 }
 
+// --- search: the header box opens #search=<query> in the list dialog, which has its own box to refine it ---------
+
+const SEARCH_MIN = 2;
+const SEARCH_DELAY_MS = 500;
+const searchBox = document.getElementById('search');
+const listSearch = document.getElementById('list-search');
+// Include closed, beside each box; the two always agree. Off by default: a search over open records only is
+// what's usually wanted, and quicker.
+const closedBoxes = [document.getElementById('search-closed'), document.getElementById('list-closed')];
+let searchTimer = null;
+// The query and snapshot the results were last fetched for, so the 60 s re-render doesn't fetch them again.
+let searchDrawn = null;
+// Only the latest request draws its results: answers can come back out of order.
+let searchSeq = 0;
+
+/** Shows or hides the dialog's search box; the dialog is wider for search results, to keep each on one line. */
+function setSearchMode(on) {
+  document.getElementById('list-search-form').hidden = !on;
+  document.getElementById('search-data').hidden = !on;
+  document.getElementById('list').classList.toggle('searching', on);
+  if (!on) searchDrawn = null;
+}
+
+/** The hash for a search: `#search=<query>`, plus `&closed=1` to include closed records. */
+const searchHash = (q, closed) => '#search=' + encodeURIComponent(q) + (closed ? '&closed=1' : '');
+
+/** Says, in the dialog, which data a search looks through: the last refresh, which Refresh now updates. */
+function showSearchData() {
+  const text = document.getElementById('search-data-text');
+  if (!snap) { text.textContent = 'Searching the data from the last refresh of GLPI.'; return; }
+  const at = new Date(snap.refreshed_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+  text.textContent = snap.error
+    ? `Searching the data read from GLPI at ${at}: the last refresh failed.`
+    : `Searching the data read from GLPI at ${at}.`;
+}
+
+/**
+ * Opens (or updates) the search results for `q` in the dialog. The server searches what it read at the last
+ * refresh, so this asks it again only when the query, Include closed or the snapshot changes.
+ * @param {string} q
+ * @param {boolean} closed include closed records
+ */
+async function showSearch(q, closed) {
+  const dlg = document.getElementById('list');
+  const count = document.getElementById('list-count');
+  const table = dlg.querySelector('table');
+  setSearchMode(true);
+  document.getElementById('list-title').textContent = 'Search';
+  for (const b of closedBoxes) b.checked = closed;
+  showSearchData();
+  // Leave a box being typed in alone: it may already hold more than this query.
+  if (document.activeElement !== listSearch) listSearch.value = q;
+  if (document.activeElement !== searchBox) searchBox.value = q;
+  if (!dlg.open) {
+    dlg.showModal();
+    listSearch.focus();
+    listSearch.setSelectionRange(listSearch.value.length, listSearch.value.length);
+  }
+  const asked = `${q}\n${closed}`;
+  const drawn = `${asked}\n${snap?.refreshed_at}`;
+  if (drawn === searchDrawn) return;
+  searchDrawn = drawn;
+  const seq = ++searchSeq;
+  if (q.trim().length < SEARCH_MIN) {
+    count.textContent = `Type at least ${SEARCH_MIN} characters to search.`;
+    searchWords = [];
+    grid(table, 'search', SEARCH_COLUMNS, []);
+    return;
+  }
+  count.textContent = 'Searching…';
+  try {
+    const res = await fetch('api/search?q=' + encodeURIComponent(q) + (closed ? '&closed=true' : ''), { cache: 'no-store' });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+    if (seq !== searchSeq) return;
+    // A new query starts unsorted and short; the same one, re-fetched after a refresh, keeps its state.
+    if (views.get('search')?.asked !== asked) views.set('search', { col: -1, dir: 1, shown: PAGE, asked });
+    searchWords = q.toLowerCase().split(/\s+/).filter(Boolean);
+    grid(table, 'search', SEARCH_COLUMNS, body.results);
+    const n = body.results.length;
+    count.textContent = body.total === 0 ? 'No matches.'
+      : `${body.total} ${body.total === 1 ? 'match' : 'matches'}${body.total > n ? ` - showing the best ${n}; add words to narrow it` : ''} - each opens in GLPI`;
+  } catch (e) {
+    if (seq !== searchSeq) return;
+    searchDrawn = null;
+    count.textContent = `Search failed: ${e.message}`;
+  }
+}
+
+/**
+ * Searches for what's in a box: the header box opens the dialog (a history entry, so Back closes it), and the
+ * dialog's box updates it in place. A query too short to search opens nothing from the header.
+ * @param {HTMLInputElement} input
+ */
+function search(input) {
+  clearTimeout(searchTimer);
+  const q = input.value.trim();
+  const closed = closedBoxes[0].checked;
+  const hash = searchHash(q, closed);
+  if (input === listSearch) {
+    if (location.hash !== hash) history.replaceState(null, '', hash);
+    showSearch(q, closed);
+  } else if (q.length >= SEARCH_MIN) {
+    if (location.hash === hash) showSearch(q, closed);
+    else location.hash = hash;
+  }
+}
+
+for (const input of [searchBox, listSearch]) {
+  input.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => search(input), SEARCH_DELAY_MS);
+  });
+  // Enter searches at once. The CSP's form-action 'none' would block a real submit anyway.
+  input.form.addEventListener('submit', (e) => { e.preventDefault(); search(input); });
+}
+// In a search box, Escape would only clear it (✕ does that); in the dialog's, it closes the dialog as anywhere else.
+listSearch.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  e.preventDefault();
+  document.getElementById('list').close();
+});
+// Include closed changes the results at once when they're showing; in the header it applies to the next search.
+for (const box of closedBoxes) {
+  box.addEventListener('change', () => {
+    for (const other of closedBoxes) other.checked = box.checked;
+    const dlg = document.getElementById('list');
+    if (dlg.open && dlg.classList.contains('searching')) search(listSearch);
+  });
+}
+
 /**
  * Loads the current snapshot and renders it; failures show in the banner and keep the old data.
  * @param {boolean} refresh POST /api/refresh, so the backend re-reads GLPI first
+ * @returns {Promise<string|null>} the banner's message if it failed, else null
  */
 async function load(refresh = false) {
   try {
@@ -473,10 +648,12 @@ async function load(refresh = false) {
     if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
     snap = body;
     render();
+    return null;
   } catch (e) {
     const err = document.getElementById('error');
     err.hidden = false;
     err.textContent = `Could not load the dashboard data: ${e.message}`;
+    return err.textContent;
   }
 }
 
@@ -532,7 +709,8 @@ for (const type of ['pointerover', 'focusin']) {
 
 const dialog = document.getElementById('list');
 dialog.addEventListener('close', () => {
-  if (location.hash.startsWith('#list=')) history.replaceState(null, '', location.pathname + location.search);
+  clearTimeout(searchTimer);
+  if (/^#(list|search)=/.test(location.hash)) history.replaceState(null, '', location.pathname + location.search);
 });
 // A click on the backdrop targets the dialog itself, but so does one on its padding, and so does a drag (a text
 // selection) that starts inside and ends on the backdrop. Close only when the press and the release were both
@@ -551,17 +729,23 @@ document.querySelector('#list .close').addEventListener('click', (e) => {
   e.preventDefault();
   dialog.close();
 });
-document.getElementById('refresh').addEventListener('click', async (e) => {
-  const btn = e.currentTarget;
-  // An icon button: its name is the label, so that's what says it's busy (the icon spins too).
-  btn.disabled = true;
-  btn.setAttribute('aria-label', 'Refreshing…');
-  btn.title = 'Refreshing…';
-  await load(true);
-  btn.disabled = false;
-  btn.setAttribute('aria-label', 'Refresh now');
-  btn.title = 'Refresh now';
-});
+/**
+ * Refresh now, from the header or the search results. Both buttons show it's busy until the new data is in, and
+ * a failure the banner can't show (it's behind the dialog) is said in the dialog too.
+ * @param {MouseEvent} e
+ */
+async function refreshNow(e) {
+  const clicked = e.currentTarget;
+  const buttons = document.querySelectorAll('.refresh');
+  // Icon buttons: the name is the label, so that's what says it's busy (the icon spins too).
+  for (const b of buttons) { b.disabled = true; b.setAttribute('aria-label', 'Refreshing…'); b.title = 'Refreshing…'; }
+  const failed = await load(true);
+  for (const b of buttons) { b.disabled = false; b.setAttribute('aria-label', 'Refresh now'); b.title = 'Refresh now'; }
+  // A disabled button loses focus; give it back so the keyboard user carries on from where they were.
+  if (document.activeElement === document.body || document.activeElement === dialog) clicked.focus();
+  if (failed && clicked.id === 'list-refresh') document.getElementById('search-data-text').textContent = failed;
+}
+for (const b of document.querySelectorAll('.refresh')) b.addEventListener('click', refreshNow);
 window.addEventListener('hashchange', showList);
 load();
 setInterval(load, POLL_MS);
