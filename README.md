@@ -1,4 +1,4 @@
-# glpi-dashboard
+# GLPI Dashboard
 
 A read-only web page showing the state of your IT service management in [GLPI](https://glpi-project.org/):
 what's open, what's at risk, and what's in flight. GLPI is the only source. Monitoring tools that feed GLPI
