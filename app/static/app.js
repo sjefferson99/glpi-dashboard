@@ -819,6 +819,35 @@ function renderExplorer() {
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { explorerDrawn = null; renderExplorer(); });
 }
 
+// --- theme: System (the default), Light or Dark; theme.js applies the saved one before the page is first drawn ---
+
+const themeButtons = [...document.querySelectorAll('[data-theme-choice]')];
+
+/**
+ * Applies a theme and marks its button as the one picked.
+ * @param {string} theme 'system', 'light' or 'dark'
+ */
+function setTheme(theme) {
+  if (theme === 'system') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = theme;
+  for (const b of themeButtons) b.setAttribute('aria-pressed', String(b.dataset.themeChoice === theme));
+}
+
+setTheme(document.documentElement.dataset.theme || 'system');
+for (const b of themeButtons) {
+  b.addEventListener('click', () => {
+    const theme = b.dataset.themeChoice;
+    setTheme(theme);
+    try {
+      if (theme === 'system') localStorage.removeItem('theme');
+      else localStorage.setItem('theme', theme);
+    } catch { /* storage blocked: the choice just isn't kept */ }
+    // The explorer's box text is picked for the colours it was drawn on.
+    explorerDrawn = null;
+    renderExplorer();
+  });
+}
+
 // --- page -------------------------------------------------------------------------------------------------------
 
 /** Draws every section from `snap`, then reopens the list in the URL hash, if any. */

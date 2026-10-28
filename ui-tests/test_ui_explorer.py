@@ -408,3 +408,19 @@ def test_a_list_or_search_link_opens_when_the_explorer_was_the_last_tab(page: Pa
     expect(page.locator(opened)).to_be_visible()
     expect(page).to_have_url(re.compile(re.escape(link) + "$"))
     expect(page.get_by_role("tab", name="Record explorer")).to_have_attribute("aria-selected", "true")
+
+
+@pytest.mark.parametrize("system, choice", [("light", "Dark"), ("dark", "Light")])
+def test_box_labels_meet_wcag_aa_after_picking_a_theme(page: Page, dashboard, system, choice):
+    """The box text is picked for the colours it was drawn on, so picking a theme draws the boxes again."""
+    page.emulate_media(color_scheme=system)
+    open_explorer(page)
+    page.locator("#explore-closed").check()
+    choose(page, "kind", "area", colour="priority")
+    page.get_by_role("button", name=f"{choice} theme").click()
+    pairs = page.locator("#treemap .tm-leaf, #treemap .tm-group > .tm-label").evaluate_all(
+        "es => es.map(e => [getComputedStyle(e).color, getComputedStyle(e).backgroundColor])")
+    assert len(pairs) >= 8
+    for fg, bg in pairs:
+        hi, lo = sorted((_lum(fg), _lum(bg)), reverse=True)
+        assert (hi + 0.05) / (lo + 0.05) >= 4.5, (fg, bg)
