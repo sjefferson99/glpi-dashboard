@@ -4,10 +4,11 @@ A read-only web page showing the state of your IT service management in [GLPI](h
 what's open, what's at risk, and what's in flight. GLPI is the only source. Monitoring tools that feed GLPI
 (through their own integrations) stay the place for real-time data.
 
-This project is just my own view of my estate that suits how I work; There is no customisation capability in
-the app itself. However, with good categorisation and prioritisation it provides another view on your GLPI
-instance. And in the magic world of AI we now live in, forking and adjusting the design to tweak to your
-requirements is trivial and a better solution right now than me adding customisation options in directly.
+This project is my own view of my estate, built around how I work. The layout is fixed, but it builds itself from
+what's in your GLPI (areas from your ITIL categories, CIs from your links and impact graph), and the parts that
+depend on one site's set-up are [settings](#configuration): the title, locale, time zone, which areas weigh more
+in the risk ranking, your standard-change category and when a record counts as stale. With good categorisation
+and prioritisation it gives another view of your GLPI instance. For anything deeper, forking it is the way.
 
 The screenshots below come from a generated demo dataset, not a real GLPI.
 
@@ -22,8 +23,9 @@ The page has six tabs. The browser remembers the last one you chose.
     changes other than standard changes, still in New with no approval requested, or an empty Impacts,
     Deployment plan, Backup plan or Checklist. Each tile has a short label; hover or focus it for half a
     second to see the full rule, and press Escape to hide it.
-  - **Health at a glance**: open incidents and problems per area (the top level of the ITIL category tree),
-    rated red/amber/green. Red means any High or above. Amber means any incident or Medium problem. Anything
+  - **Health at a glance**: open incidents and problems per area, rated red/amber/green. An area is a top-level
+    ITIL category: `Security > Certificates` counts towards `Security`, so arrange your categories with the
+    areas you want at the top. Every top-level category shows, apart from the standard-change one. Red means any High or above. Amber means any incident or Medium problem. Anything
     else is green. The state is always shown as an icon and a word, not colour alone.
 
   ![The Summary tab: open record counts, record quality tiles and health per area](docs/screenshots/summary.png)
@@ -50,9 +52,10 @@ The page has six tabs. The browser remembers the last one you chose.
   priority into problems and changes. **Record type** swaps the rings. **Colours** picks how priority is
   shown: *Traffic light* (green for Very low through to red for Major) or *Heat* (one red, deeper for higher
   priority). The browser remembers both choices. Each segment and each number in the table opens its
-  records, ranked by a score made of priority, security area, an internet-facing CI, age and open incidents
-  on a problem; the table's All / All opens every one. The weights are `RISK_*` in `app/model.py`, and the
-  "Why" column shows each record's breakdown, so they're easy to tune. The table names every priority, so
+  records, ranked by a score made of priority, area (`RISK_AREAS`: Security +15 by default), an internet-facing
+  CI, age and open incidents on a problem; the table's All / All opens every one. The other weights are `RISK_*`
+  in `app/model.py`, and the "Why" column shows each record's breakdown, so they're easy to tune (see
+  [Tuning the risk ranking](#tuning-the-risk-ranking)). The table names every priority, so
   colour is never the only cue: six traffic-light steps can't all stay distinct for colour-blind readers.
 
   ![The Risk analysis tab: a two-ring chart of open problems and changes by priority, beside a table](docs/screenshots/risks.png)
@@ -165,6 +168,46 @@ Copy `.env.example` to `.env` and fill it in. Keep `.env` readable only by admin
 | `REFRESH_SECONDS` | How often to re-read GLPI (default 300) |
 | `INTERNET_FACING_ROOTS` | Comma-separated CI names whose impacted CIs are internet-facing (default none) |
 | `INTERNET_FACING_EXTRA` | Further comma-separated CI names that are internet-facing (default none) |
+
+These are optional, for fitting the page to your GLPI. A value that doesn't parse logs a warning and keeps the
+default, so a typo never stops the dashboard. Area names must match a top-level ITIL category exactly, case
+included; each refresh logs a warning naming any that match none.
+
+| Variable | Meaning |
+|---|---|
+| `DASHBOARD_TITLE` | The page title and heading (default `Network state`) |
+| `LOCALE` | Language tag for dates, times and sorting on the page, e.g. `en-US` (default `en-GB`) |
+| `GLPI_TZ` | GLPI's time zone, so ages and dates match GLPI's (default `Europe/London`). `compose.yml` hands it to the container as `TZ`; it's named apart so a `TZ` set in your shell can't override it |
+| `RISK_AREAS` | Extra risk points per area, as comma-separated `Area:points` (default `Security:15`; empty for none). GLPI has nowhere to keep a weight on a category, so it's set here |
+| `STANDARD_CHANGE_AREA` | The top-level category of pre-approved changes, left out of the risks, the areas and the change checks (default `Standard change`; empty for none) |
+| `STALE_DAYS` | Days without an update before an open record counts as stale (default 30) |
+
+### Tuning the risk ranking
+
+A record's risk score is its points added up:
+
+| Part | Points |
+|---|---|
+| Priority | Very low 0, Low 10, Medium 25, High 45, Very high 70, Major 90 |
+| Area (`RISK_AREAS`) | Security 15 by default, or whatever you set |
+| An internet-facing CI | 15 |
+| Age | 0 to 15, rising over 180 days |
+| Open incidents linked to a problem | 5 each, up to 15 |
+
+No area bonus is right in itself. What matters is where it lands against the gaps between priorities (10, 15, 20,
+25 and 20 points), so decide whether a record in that area should jump a priority level or only rank higher
+within its own:
+
+- **Up to about 15** mostly reorders records within a priority. A Medium Security problem (25 + 15 = 40) stays
+  below a plain High (45), but beats every other Medium.
+- **20 or more** lets the area jump a level: Medium plus 20 ties with a plain High.
+- **Over 35**, a Low record in the area (10 + 36 = 46) beats a plain High, so the area outweighs priority.
+
+To choose, name one pair of records you have a view on, e.g. "a Medium security issue on an internet-facing host
+should beat an ordinary High". That's 25 + 15 + bonus > 45, so the bonus must be over 5. Set it, restart the
+container, and check the Risk analysis ranking: the **Why** column shows each record's points. Keep several areas'
+bonuses in proportion to each other, or the ranking stops following priority. The other weights are `RISK_*` in
+`app/model.py`.
 
 ## Running
 

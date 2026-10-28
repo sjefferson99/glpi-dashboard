@@ -7,14 +7,16 @@ writes to GLPI.
 """
 import asyncio
 import contextlib
+import html
 import logging
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import model
@@ -29,11 +31,68 @@ def _names(var):
     return [s.strip() for s in os.environ.get(var, "").split(",") if s.strip()]
 
 
-REFRESH_SECONDS = int(os.environ.get("REFRESH_SECONDS", "300"))
+def _whole(var, default):
+    """Returns a positive whole number from an environment variable.
+
+    Unset or blank gives ``default``. Anything else that isn't a positive whole number logs a warning and
+    gives ``default`` too, so a typo can't stop the app from starting.
+    """
+    raw = os.environ.get(var, "").strip()
+    if not raw:
+        return default
+    if raw.isdecimal() and int(raw) > 0:
+        return int(raw)
+    log.warning("%s=%r is not a positive whole number; using %d", var, raw, default)
+    return default
+
+
+def _risk_areas(var="RISK_AREAS"):
+    """Returns the risk bonus by area from ``Area:points`` pairs, comma-separated.
+
+    Unset gives ``model.RISK_AREAS``; empty gives no bonus at all. A pair that doesn't parse is skipped with a
+    warning. The last ``:`` splits a pair, so an area name may itself hold one.
+    """
+    raw = os.environ.get(var)
+    if raw is None:
+        return dict(model.RISK_AREAS)
+    out = {}
+    for pair in filter(None, (p.strip() for p in raw.split(","))):
+        area, _, points = pair.rpartition(":")
+        area, points = area.strip(), points.strip()
+        if area and points.isdecimal():
+            out[area] = int(points)
+        else:
+            log.warning("%s: skipping %r, expected Area:points", var, pair)
+    return out
+
+
+def _locale(var="LOCALE", default="en-GB"):
+    """Returns a language tag (e.g. ``en-US``) for dates and sorting, or ``default`` with a warning if malformed.
+
+    It goes into the page's ``<html lang>``, so only letters, digits and hyphens get through.
+    """
+    raw = os.environ.get(var, "").strip()
+    if not raw:
+        return default
+    if LANG_TAG.fullmatch(raw):
+        return raw
+    log.warning("%s=%r is not a language tag like en-GB; using %s", var, raw, default)
+    return default
+
+
+LANG_TAG = re.compile(r"[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*")
+
+REFRESH_SECONDS = _whole("REFRESH_SECONDS", 300)
 GLPI_PUBLIC_URL = os.environ.get("GLPI_PUBLIC_URL", "https://glpi.example.com")
 INTERNET_ROOTS = _names("INTERNET_FACING_ROOTS")
 INTERNET_EXTRA = _names("INTERNET_FACING_EXTRA")
+RISK_AREAS = _risk_areas()
+STANDARD_CHANGE_AREA = os.environ.get("STANDARD_CHANGE_AREA", model.STANDARD_CHANGE_AREA).strip()
+STALE_DAYS = _whole("STALE_DAYS", model.STALE_DAYS)
+DASHBOARD_TITLE = os.environ.get("DASHBOARD_TITLE", "").strip() or "Network state"
+LOCALE = _locale()
 STATIC = Path(__file__).parent / "static"
+INDEX = (STATIC / "index.html").read_text(encoding="utf-8")
 
 # No ChangeValidation: GLPI only lets a profile see approval requests if it may also create or
 # approve them. A change's own global_validation says whether it is waiting for approval.
@@ -47,6 +106,7 @@ MANUAL_MIN_SECONDS = 30
 
 state = {"snapshot": None, "search": None, "explorer": None, "error": None, "refreshed_at": None}
 refresh_lock = asyncio.Lock()
+unmatched_areas = []      # what check_areas() last warned about
 
 
 def make_client():
@@ -94,11 +154,31 @@ async def collect(glpi):
     return data
 
 
+def check_areas(categories):
+    """Warns about any area in ``RISK_AREAS`` or ``STANDARD_CHANGE_AREA`` that isn't an area in GLPI.
+
+    Names must match a top-level category exactly, case included, so a typo would otherwise just do nothing.
+    The warning is logged when the set of unmatched names changes, not at every refresh.
+
+    Args:
+        categories: ``ITILCategory`` rows, with ``completename``.
+    """
+    global unmatched_areas
+    configured = set(RISK_AREAS) | ({STANDARD_CHANGE_AREA} if STANDARD_CHANGE_AREA else set())
+    unmatched = sorted(configured - model.areas(categories))
+    if unmatched and unmatched != unmatched_areas:
+        log.warning("no top-level ITIL category in GLPI is named %s (RISK_AREAS / STANDARD_CHANGE_AREA): "
+                    "names must match exactly, case included", ", ".join(map(repr, unmatched)))
+    unmatched_areas = unmatched
+
+
 async def refresh(glpi):
     """Rebuilds the snapshot, the search index and the explorer's records from GLPI and clears any recorded error."""
     data = await collect(glpi)
+    check_areas(data["ITILCategory"])
     now = datetime.now()
-    builder = model.Builder(data, now, GLPI_PUBLIC_URL, INTERNET_ROOTS, INTERNET_EXTRA)
+    builder = model.Builder(data, now, GLPI_PUBLIC_URL, INTERNET_ROOTS, INTERNET_EXTRA, risk_areas=RISK_AREAS,
+                            standard_change_area=STANDARD_CHANGE_AREA, stale_days=STALE_DAYS)
     snapshot = builder.build()
     index = builder.search_index()
     explorer = builder.explorer()
@@ -221,6 +301,18 @@ async def healthz():
     if at is None or (datetime.now() - at).total_seconds() > 3 * REFRESH_SECONDS:
         return JSONResponse({"ok": False}, status_code=503)
     return {"ok": True, "refreshed_at": at.isoformat(timespec="seconds")}
+
+
+@app.api_route("/", methods=["GET", "HEAD"])
+@app.api_route("/index.html", methods=["GET", "HEAD"])
+async def index():
+    """Serves the page with its title and language filled in.
+
+    They're written into the HTML rather than sent as data, so the CSP needs no inline script and the
+    title shows before the first snapshot. The title is escaped; the language is checked by ``_locale()``.
+    """
+    page = INDEX.replace("{{LANG}}", html.escape(LOCALE)).replace("{{TITLE}}", html.escape(DASHBOARD_TITLE))
+    return HTMLResponse(page)
 
 
 app.mount("/", StaticFiles(directory=STATIC, html=True), name="static")

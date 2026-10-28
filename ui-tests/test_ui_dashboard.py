@@ -6,6 +6,7 @@ import httpx
 import pytest
 from playwright.sync_api import Page, expect
 
+import main
 from fake_glpi import PUBLIC_URL
 
 PAGE = 10   # rows a table shows before "Show more"
@@ -261,6 +262,35 @@ def test_backend_unreachable_shows_a_banner(page: Page, dashboard):
     page.locator("#refresh").click()
     expect(page.locator("#error")).to_contain_text("Could not load the dashboard data")
     expect(page.locator("#refresh")).to_be_enabled()
+
+
+# --- site settings --------------------------------------------------------------------------------------------
+
+def test_title_is_configurable_and_shown_as_text(page: Page, dashboard, console_errors, monkeypatch):
+    monkeypatch.setattr(main, "DASHBOARD_TITLE", "Ops board " + XSS)
+    open_page(page)
+    expect(page).to_have_title("Ops board " + XSS)
+    expect(page.get_by_role("heading", level=1)).to_have_text("Ops board " + XSS)
+    assert page.locator("header script, header img:not(.logo)").count() == 0
+    assert page.evaluate("window.__xss") is None
+    assert console_errors == []
+
+
+def test_locale_sets_the_date_format(page: Page, dashboard, console_errors, monkeypatch):
+    open_page(page)
+    expect(page.locator("#updated")).to_have_text(re.compile(r"^Updated \d{1,2} [A-Z][a-z]{2} \d{4}"))   # en-GB
+    monkeypatch.setattr(main, "LOCALE", "en-US")
+    open_page(page)
+    expect(page.locator("html")).to_have_attribute("lang", "en-US")
+    expect(page.locator("#updated")).to_have_text(re.compile(r"^Updated [A-Z][a-z]{2} \d{1,2}, \d{4}"))
+    assert console_errors == []
+
+
+def test_unreadable_locale_falls_back_to_en_gb(page: Page, dashboard, console_errors, monkeypatch):
+    monkeypatch.setattr(main, "LOCALE", "not a locale!")        # _locale() stops this; the page copes anyway
+    open_page(page)
+    expect(page.locator("#updated")).to_have_text(re.compile(r"^Updated \d{1,2} [A-Z][a-z]{2} \d{4}"))
+    assert console_errors == []
 
 
 # --- XSS ------------------------------------------------------------------------------------------------------

@@ -3,7 +3,9 @@
 Every number on the page is the length of a named list in ``lists``, and
 clicking it shows that list, so a count and the records behind it can never
 disagree. Statuses are GLPI's own. Areas are the top level of the ITIL category
-tree. The ranked-risk weighting is ``RISK_*`` below.
+tree. The ranked-risk weighting is ``RISK_*`` below. The site-specific settings
+(``STANDARD_CHANGE_AREA``, ``STALE_DAYS``, ``RISK_AREAS``) are defaults that
+``main.py`` may override from the environment.
 """
 import html
 import re
@@ -25,8 +27,8 @@ CHANGE_APPLIED = 5
 CHANGE_WORKING = (7, 11, 12)      # Accepted, Testing, Qualification
 VALIDATION_WAITING = 2           # Change.global_validation: 1 none, 2 waiting, 3 accepted, 4 refused
 
-STANDARD_CHANGE_AREA = "Standard change"
-SECURITY_AREA = "Security"
+STANDARD_CHANGE_AREA = "Standard change"   # pre-approved changes: no risk score, no area, no change checks
+UNCATEGORISED = "Uncategorised"            # the area of a record with no category
 
 # Record quality: what the GLPI working rules expect every open record to have.
 STALE_DAYS = 30
@@ -42,7 +44,7 @@ TAG = re.compile(r"<[^>]*>")
 
 # Ranked risks: points per priority, plus flat bonuses, plus age (linear to RISK_AGE_DAYS).
 RISK_PRIORITY = {1: 0, 2: 10, 3: 25, 4: 45, 5: 70, 6: 90}
-RISK_SECURITY = 15
+RISK_AREAS = {"Security": 15}               # bonus points by area
 RISK_INTERNET = 15
 RISK_AGE_MAX, RISK_AGE_DAYS = 15, 180
 RISK_PER_INCIDENT, RISK_INCIDENTS_MAX = 5, 15
@@ -86,6 +88,20 @@ def _snippet(text, terms):
     return ("…" if start else "") + text[start:end].strip() + ("…" if end < len(text) else "")
 
 
+def _area(category):
+    """Returns the area of an ITIL category's full name: its top level, or ``UNCATEGORISED`` for none."""
+    return category.split(" > ")[0] if category else UNCATEGORISED
+
+
+def areas(categories):
+    """Returns every area records can have: each top-level ITIL category, plus ``UNCATEGORISED``.
+
+    Args:
+        categories: ``ITILCategory`` rows, with ``completename``.
+    """
+    return {_area(c.get("completename") or "") for c in categories} | {UNCATEGORISED}
+
+
 def _rag(items):
     """Rates a set of open incidents and problems red, amber or green.
 
@@ -104,9 +120,13 @@ def _rag(items):
 
 
 class Builder:
-    """Builds one snapshot; see ``build()`` for the arguments."""
+    """Builds one snapshot; see ``build()`` for the arguments.
 
-    def __init__(self, data, now, glpi_url, internet_roots, internet_extra):
+    ``risk_areas``, ``standard_change_area`` and ``stale_days`` default to the module's settings.
+    """
+
+    def __init__(self, data, now, glpi_url, internet_roots, internet_extra, risk_areas=None,
+                 standard_change_area=STANDARD_CHANGE_AREA, stale_days=STALE_DAYS):
         self.d = data
         self.now = now
         self.url = glpi_url.rstrip("/")
@@ -116,6 +136,9 @@ class Builder:
         self.category = {i: c["completename"] for i, c in cats.items()}
         self.ci_names = {(t, r["id"]): r["name"] for t, rows in data["cis"].items() for r in rows}
         self.internet = self._internet_facing(internet_roots, internet_extra)
+        self.risk_areas = RISK_AREAS if risk_areas is None else risk_areas
+        self.standard = standard_change_area
+        self.stale_days = stale_days
 
     # --- helpers -----------------------------------------------------------------
 
@@ -216,7 +239,7 @@ class Builder:
                     "status_id": r["status"], "open": r["status"] not in done[itemtype],
                     "priority": r["priority"], "priority_name": PRIORITY.get(r["priority"], "?"),
                     "urgency": r["urgency"], "impact": r["impact"],
-                    "category": category, "area": category.split(" > ")[0] if category else "Uncategorised",
+                    "category": category, "area": _area(category),
                     "date": opened.date().isoformat(), "age_days": max((self.now - opened).days, 0),
                     "updated": updated.date().isoformat() if updated else None,
                     "url": f"{self.url}/front/{FORM[itemtype]}.form.php?id={r['id']}",
@@ -264,7 +287,7 @@ class Builder:
         everything = self.open_of("Incident", "Request", "Problem", "Change")
         linked_problems = ({row["problems_id"] for row in self.d["Problem_Ticket"]}
                            | {row["problems_id"] for row in self.d["Change_Problem"]})
-        changes = [k for k in self.open_of("Change") if R[k]["area"] != STANDARD_CHANGE_AREA]
+        changes = [k for k in self.open_of("Change") if R[k]["area"] != self.standard]
         validation = {c["id"]: c.get("global_validation") for c in self.d["Change"]}
         tiles = [
             ("no-category", "issue", "No category", "Open records without a category",
@@ -276,9 +299,9 @@ class Builder:
             ("unassigned", "issue", "Unassigned", "Open records with no one assigned",
              "Open records with no technician or group assigned. Requesters and observers don't count.",
              [k for k in everything if not R[k]["_assigned"]]),
-            ("stale", "issue", f"Stale ({STALE_DAYS} d)", f"Open records not updated in {STALE_DAYS} days",
-             f"Open records with no update in the last {STALE_DAYS} days.",
-             [k for k in everything if R[k]["_idle_days"] > STALE_DAYS]),
+            ("stale", "issue", f"Stale ({self.stale_days} d)", f"Open records not updated in {self.stale_days} days",
+             f"Open records with no update in the last {self.stale_days} days.",
+             [k for k in everything if R[k]["_idle_days"] > self.stale_days]),
             ("orphan-problems", "problem", "Orphan problems", "Open problems linked to no incident and no change",
              "Open problems not linked to any incident or change.",
              [k for k in self.open_of("Problem") if R[k]["id"] not in linked_problems]),
@@ -300,7 +323,7 @@ class Builder:
         R = self.records
         items = self.open_of("Incident", "Problem")
         areas = sorted({R[k]["area"] for k in items} | {
-            c.split(" > ")[0] for c in self.category.values()} - {STANDARD_CHANGE_AREA})
+            c.split(" > ")[0] for c in self.category.values()} - {self.standard})
         out_areas = []
         for area in areas:
             mine = [k for k in items if R[k]["area"] == area]
@@ -356,15 +379,16 @@ class Builder:
                 incidents_of.setdefault(row["problems_id"], []).append(row["tickets_id"])
         cands = [k for k in self.open_of("Problem")] + [
             k for k in self.open_of("Change")
-            if R[k]["status_id"] != CHANGE_APPLIED and R[k]["area"] != STANDARD_CHANGE_AREA]
+            if R[k]["status_id"] != CHANGE_APPLIED and R[k]["area"] != self.standard]
         scored = []
         for k in cands:
             r = R[k]
             why = [f"priority {r['priority_name']} +{RISK_PRIORITY.get(r['priority'], 0)}"]
             score = RISK_PRIORITY.get(r["priority"], 0)
-            if r["area"] == SECURITY_AREA:
-                score += RISK_SECURITY
-                why.append(f"security +{RISK_SECURITY}")
+            area_bonus = self.risk_areas.get(r["area"], 0)
+            if area_bonus:
+                score += area_bonus
+                why.append(f"{r['area'].lower()} +{area_bonus}")
             facing = [c["name"] for c in r["cis"] if c["internet"]]
             if facing:
                 score += RISK_INTERNET
@@ -636,7 +660,7 @@ def search(index, query, closed=False, limit=SEARCH_LIMIT):
     return {"query": query, "total": len(hits), "results": results}
 
 
-def build(data, now, glpi_url, internet_roots=(), internet_extra=()):
+def build(data, now, glpi_url, internet_roots=(), internet_extra=(), **settings):
     """Builds the dashboard snapshot from GLPI rows.
 
     Args:
@@ -645,9 +669,11 @@ def build(data, now, glpi_url, internet_roots=(), internet_extra=()):
         glpi_url: GLPI's address as a browser reaches it; every link points here.
         internet_roots: CI names whose impacted CIs count as internet-facing (e.g. a reverse proxy).
         internet_extra: Further CI names that count as internet-facing.
+        **settings: ``risk_areas`` (bonus points by area, default ``RISK_AREAS``), ``standard_change_area``
+            (``""`` for none) and ``stale_days``, as ``Builder`` takes them.
 
     Returns:
         A JSON-ready dict: ``summary``, ``quality``, ``health``, ``risks``, ``in_flight``, ``lists``, ``records``
         and ``glpi_url``.
     """
-    return Builder(data, now, glpi_url, internet_roots, internet_extra).build()
+    return Builder(data, now, glpi_url, internet_roots, internet_extra, **settings).build()

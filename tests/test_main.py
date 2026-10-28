@@ -1,5 +1,6 @@
 """The FastAPI app end to end, against the fake GLPI: refresh loop, endpoints, health, headers."""
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -201,3 +202,112 @@ def test_make_client_reads_the_environment(monkeypatch):
     g = main.make_client()
     assert g.base == "http://glpi.internal.test/apirest.php"
     assert (g.app_token, g.user_token) == ("a", "u")
+
+
+@pytest.mark.parametrize("raw,expected", [(None, 30), ("", 30), (" 45 ", 45), ("0", 30), ("-5", 30), ("ten", 30),
+                                          ("1.5", 30), ("²", 30)])
+def test_whole_numbers_fall_back_to_the_default(monkeypatch, caplog, raw, expected):
+    if raw is None:
+        monkeypatch.delenv("STALE_DAYS", raising=False)
+    else:
+        monkeypatch.setenv("STALE_DAYS", raw)
+    assert main._whole("STALE_DAYS", 30) == expected
+    assert ("STALE_DAYS" in caplog.text) == (raw not in (None, "", " 45 "))
+
+
+@pytest.mark.parametrize("raw,expected", [
+    (None, {"Security": 15}),
+    ("", {}),
+    ("Security:15, Network : 5 ,,", {"Security": 15, "Network": 5}),
+    ("Ops: Night:10", {"Ops: Night": 10}),                  # the last colon splits
+])
+def test_risk_areas_from_the_environment(monkeypatch, raw, expected):
+    if raw is None:
+        monkeypatch.delenv("RISK_AREAS", raising=False)
+    else:
+        monkeypatch.setenv("RISK_AREAS", raw)
+    assert main._risk_areas() == expected
+
+
+def test_bad_risk_areas_are_skipped_with_a_warning(monkeypatch, caplog):
+    monkeypatch.setenv("RISK_AREAS", "Security:15,Network,:5,Hosting:-3,Ops:lots")
+    assert main._risk_areas() == {"Security": 15}
+    for bad in ("'Network'", "':5'", "'Hosting:-3'", "'Ops:lots'"):
+        assert bad in caplog.text
+
+
+@pytest.mark.parametrize("raw,expected", [(None, "en-GB"), ("", "en-GB"), ("en-US", "en-US"), ("de", "de"),
+                                          ("zh-Hant-TW", "zh-Hant-TW"), ('en"><script>', "en-GB"),
+                                          ("en_GB", "en-GB"), ("e", "en-GB")])
+def test_locale_must_be_a_language_tag(monkeypatch, raw, expected):
+    if raw is None:
+        monkeypatch.delenv("LOCALE", raising=False)
+    else:
+        monkeypatch.setenv("LOCALE", raw)
+    assert main._locale() == expected
+
+
+def test_refresh_uses_the_site_settings(client, monkeypatch):
+    monkeypatch.setattr(main, "MANUAL_MIN_SECONDS", 0)
+    monkeypatch.setattr(main, "RISK_AREAS", {})
+    monkeypatch.setattr(main, "STANDARD_CHANGE_AREA", "")
+    monkeypatch.setattr(main, "STALE_DAYS", 60)
+    body = client.post("/api/refresh").json()
+    assert "Change:4" in body["lists"]["risks-all"]["refs"]
+    assert body["records"]["Problem:1"]["risk"]["score"] == 53
+    assert body["lists"]["stale"]["title"] == "Open records not updated in 60 days"
+
+
+# --- the page -------------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("path", ["/", "/index.html"])
+def test_page_has_the_default_title_and_language(client, path):
+    r = client.get(path)
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/html")
+    assert '<html lang="en-GB">' in r.text
+    assert "<title>Network state</title>" in r.text and 'class="logo">Network state</h1>' in r.text
+    assert "{{" not in r.text
+    assert "default-src 'self'" in r.headers["content-security-policy"]
+
+
+def test_page_title_and_language_are_configurable_and_escaped(client, monkeypatch):
+    monkeypatch.setattr(main, "DASHBOARD_TITLE", 'Ops & "IT" <script>alert(1)</script> {{LANG}}')
+    monkeypatch.setattr(main, "LOCALE", "en-US")
+    text = client.get("/").text
+    assert '<html lang="en-US">' in text
+    assert "<title>Ops &amp; &quot;IT&quot; &lt;script&gt;alert(1)&lt;/script&gt; {{LANG}}</title>" in text
+    assert "<script>alert" not in text
+
+
+def test_page_answers_head(client):
+    assert client.head("/").status_code == 200
+
+
+def test_an_area_matching_no_category_is_logged_once(client, monkeypatch, caplog):
+    monkeypatch.setattr(main, "MANUAL_MIN_SECONDS", 0)
+    monkeypatch.setattr(main, "unmatched_areas", [])
+    monkeypatch.setattr(main, "RISK_AREAS", {"security": 15, "Uncategorised": 5})
+    monkeypatch.setattr(main, "STANDARD_CHANGE_AREA", "Standard Changes")
+    client.post("/api/refresh")
+    warnings = [r.getMessage() for r in caplog.records if "no top-level ITIL category" in r.getMessage()]
+    assert warnings == ["no top-level ITIL category in GLPI is named 'Standard Changes', 'security' "
+                        "(RISK_AREAS / STANDARD_CHANGE_AREA): names must match exactly, case included"]
+    caplog.clear()
+    client.post("/api/refresh")
+    assert "no top-level ITIL category" not in caplog.text        # unchanged, so not repeated
+
+
+def test_areas_that_match_are_not_logged(client, monkeypatch, caplog):
+    monkeypatch.setattr(main, "MANUAL_MIN_SECONDS", 0)
+    monkeypatch.setattr(main, "unmatched_areas", [])
+    monkeypatch.setattr(main, "RISK_AREAS", {"Security": 15, "Uncategorised": 5})
+    monkeypatch.setattr(main, "STANDARD_CHANGE_AREA", "")
+    client.post("/api/refresh")
+    assert "no top-level ITIL category" not in caplog.text
+
+
+def test_compose_time_zone_is_not_taken_from_the_shell():
+    # Compose interpolates from the deploying shell before .env, and shells may export TZ.
+    compose = (Path(__file__).parent.parent / "compose.yml").read_text(encoding="utf-8")
+    assert "TZ: ${GLPI_TZ:-Europe/London}" in compose
+    assert "${TZ" not in compose
