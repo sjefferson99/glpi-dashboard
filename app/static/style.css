@@ -360,6 +360,9 @@ dialog::backdrop { background: rgb(0 0 0 / 0.45); }
 #search-data { margin: 6px 0 0; font-size: 0.8rem; }
 /* Search results hang from a fixed top, so the box doesn't jump about as the results grow and shrink. */
 dialog.searching { width: min(1500px, calc(100vw - 32px)); margin: 48px auto auto; max-height: calc(100vh - 72px); }
+/* A search with an #id in it: ID matches, then Text matches. */
+#list h3 { margin: 14px 0 6px; color: var(--text-primary); }
+#search-ids h3 { margin-top: 4px; }
 .grid td.snippet { color: var(--text-secondary); font-size: 0.82rem; min-width: 16em; }
 /* A light tint, so link text on it keeps 4.5:1 in both themes; bold keeps it easy to spot. */
 mark { color: inherit; font-weight: 600; background: color-mix(in srgb, var(--warning) 20%, transparent); border-radius: 2px; }

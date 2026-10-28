@@ -112,15 +112,20 @@ default, which also keeps searches quicker. Pause typing for half a second, or p
 the page. They have their own search box (✕ clears it) and Include closed, to refine them, and say which refresh
 they search. Their **Refresh now** button re-reads GLPI and searches again. A result must contain every word typed
 (ignoring case), in its title, description, category, status, reference or linked CI names, or for a CI its
-serial, inventory number or comment. An exact `#id` comes first, then title matches, then everything but closed
-records, most recently updated first. Words found only in the description are shown in context. Up to 100
-results are listed, with the total. Searches can be bookmarked (`#search=<words>`, plus `&closed=1`). Only CIs of
-the types linked to a record (or in the impact graph) are searched, since those are the ones the dashboard reads.
-Followups, tasks and solutions aren't searched: reading them would cost GLPI many more requests. Search shows
-description text, which the rest of the page doesn't, so anyone who can open the dashboard can read the
-descriptions.
+serial, inventory number or comment. Title matches come first, then everything but closed records, most recently
+updated first. Words found only in the description are shown in context. Up to 100 results are listed, with the
+total. Searches can be bookmarked (`#search=<words>`, plus `&closed=1`). Only CIs of the types linked to a record
+(or in the impact graph) are searched, since those are the ones the dashboard reads. Followups, tasks and solutions
+aren't searched: reading them would cost GLPI many more requests. Search shows description text, which the rest of
+the page doesn't, so anyone who can open the dashboard can read the descriptions.
 
 ![Search results for vpn, closed records included, one found in a description](docs/screenshots/search.png)
+
+**Search by ID**: a word like `#12` names an ID. GLPI's IDs are only unique within a type, so the results open
+with **ID matches**: every ticket, problem, change, project and CI with that ID, closed or not. Below them,
+**Text matches** lists the other records that mention `#12` (but not `#123`) and contain any other words typed.
+
+![Search for #3: six records with that ID, three of them closed, then a change that mentions problem #3](docs/screenshots/search-id.png)
 
 "Internet-facing" comes from GLPI's impact graph: the CIs impacted by `INTERNET_FACING_ROOTS` (typically your
 reverse proxy), plus the CIs named in `INTERNET_FACING_EXTRA` (e.g. the firewall).

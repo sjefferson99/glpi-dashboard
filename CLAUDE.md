@@ -86,6 +86,7 @@ That belongs in the issue and the PR.
   | `explorer.png` | `--tab "Record explorer"` |
   | `list.png` | `--link "#list=high-priority" --element "#list"` |
   | `search.png` | `--link "#search=vpn&closed=1" --element "#list"` |
+  | `search-id.png` | `--link "#search=%233" --element "#list"` |
 - **A Claude code review before every merge.** Run `/code-review` on the PR as **one sequential pass with no
   sub-agents**. Reproduce each finding against a crafted input before reporting it. Post the findings as PR
   comments (labelled as below), then stop. Fixes wait for the user's approval, even obvious ones. Re-run the
