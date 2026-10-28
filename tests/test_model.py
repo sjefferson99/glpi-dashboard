@@ -143,6 +143,13 @@ def test_stale_falls_back_to_the_opening_date():
     assert "Ticket:2" in stale and "Ticket:1" not in stale
 
 
+def test_stale_days_is_configurable():
+    snap = model.build(model_input(), NOW, PUBLIC_URL, ROOTS, EXTRA, stale_days=60)
+    assert refs(snap, "stale") == ["Change:2"]            # P1, last updated 45 days ago, no longer counts
+    tile = next(t for t in snap["quality"] if t["key"] == "stale")
+    assert (tile["label"], tile["title"]) == ("Stale (60 d)", "Open records not updated in 60 days")
+
+
 def test_orphan_problem_has_no_incident_and_no_change():
     data = model_input()
     data["Problem"] += [{**data["Problem"][0], "id": 3}, {**data["Problem"][0], "id": 4},
@@ -276,6 +283,23 @@ def test_standard_change_is_not_an_area(snap):
     assert "Standard change" not in {a["area"] for a in snap["health"]["areas"]}
 
 
+def test_standard_change_area_is_configurable():
+    snap = model.build(model_input(), NOW, PUBLIC_URL, ROOTS, EXTRA, standard_change_area="Network")
+    # "Standard change" is now an ordinary area. Network still shows: an area with an open incident always does.
+    assert {a["area"] for a in snap["health"]["areas"]} >= {"Standard change", "Network"}
+    # C2 (Network) is now a standard change: no risk score, no plan check. C4 is an ordinary change in New.
+    assert set(refs(snap, "risks-all")) == {"Change:1", "Problem:1", "Change:4"}
+    assert refs(snap, "empty-plan") == ["Change:4"]
+    assert refs(snap, "no-approval") == ["Change:4"]
+
+
+def test_no_standard_change_area_checks_every_change():
+    snap = model.build(model_input(), NOW, PUBLIC_URL, ROOTS, EXTRA, standard_change_area="")
+    assert "Standard change" in {a["area"] for a in snap["health"]["areas"]}
+    assert "Change:4" in refs(snap, "risks-all")
+    assert set(refs(snap, "empty-plan")) == {"Change:2", "Change:4"}
+
+
 @pytest.mark.parametrize("items,expected", [
     ([], "green"),
     ([{"kind": "Problem", "priority": 2}], "green"),
@@ -326,6 +350,20 @@ def test_risks_skip_applied_and_standard_changes(snap):
     keys = set(refs(snap, "risks-all"))
     assert "Change:3" not in keys and "Change:4" not in keys
     assert "risk" not in snap["records"]["Change:3"]
+
+
+def test_risk_areas_are_configurable():
+    snap = model.build(model_input(), NOW, PUBLIC_URL, ROOTS, EXTRA, risk_areas={"Network": 20})
+    # C2 (Network): 25 + 20 + internet 15 + age 15 = 75. C1 and P1 lose their security 15: 60 and 53.
+    assert [(k, r["score"]) for k, r in _risks(snap)] == [("Change:2", 75), ("Change:1", 60), ("Problem:1", 53)]
+    assert snap["records"]["Change:2"]["risk"]["why"] == [
+        "priority Medium +25", "network +20", "internet-facing (firewall) +15", "age 200 d +15"]
+
+
+def test_no_risk_areas_gives_no_area_bonus():
+    snap = model.build(model_input(), NOW, PUBLIC_URL, ROOTS, EXTRA, risk_areas={})
+    assert [(k, r["score"]) for k, r in _risks(snap)] == [("Change:1", 60), ("Change:2", 55), ("Problem:1", 53)]
+    assert not any("security" in w for _, r in _risks(snap) for w in r["why"])
 
 
 def test_incident_bonus_is_capped():

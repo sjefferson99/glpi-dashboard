@@ -1,16 +1,16 @@
 <!doctype html>
-<html lang="en-GB">
+<html lang="{{LANG}}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Network state</title>
+  <title>{{TITLE}}</title>
   <link rel="icon" href="logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="style.css">
   <script src="app.js" defer></script>
 </head>
 <body>
   <header class="top">
-    <h1><img src="logo.svg" alt="" class="logo">Network state</h1>
+    <h1><img src="logo.svg" alt="" class="logo">{{TITLE}}</h1>
     <form id="search-form" class="search" role="search">
       <label for="search" class="visually-hidden">Search records, projects and CIs</label>
       <input id="search" type="search" placeholder="Search records, projects and CIs" maxlength="100"
@@ -70,7 +70,7 @@
     <section id="panel-risks" role="tabpanel" aria-labelledby="tab-risks" tabindex="0" hidden>
       <h2 id="h-risks">Risks</h2>
       <p class="hint">Open problems and changes (not Applied, not standard changes). Each one is scored on
-        priority, security area, internet-facing CI, age and open incidents. Pick a segment or a number to list its
+        priority, area, internet-facing CI, age and open incidents. Pick a segment or a number to list its
         records, highest score first; All / All lists every one.</p>
       <div class="risk-tools">
         <div class="toggle" role="group" aria-label="Inner ring">

@@ -7,6 +7,14 @@ const POLL_MS = 60_000;
 const PAGE = 10;
 const RAG = { red: ['■', 'Act'], amber: ['▲', 'Watch'], green: ['●', 'OK'] };
 const RAG_ORDER = { red: 0, amber: 1, green: 2 };
+// The server fills in <html lang> from its LOCALE setting; a tag Intl can't read would throw on every date.
+const LOCALE = (() => {
+  try {
+    return Intl.getCanonicalLocales(document.documentElement.lang)[0] || 'en-GB';
+  } catch {
+    return 'en-GB';
+  }
+})();
 let snap = null;
 
 /**
@@ -210,7 +218,7 @@ function sortRows(rows, key, dir) {
   return rows.map((r, i) => [key(r), i, r]).sort(([a, i], [b, j]) => {
     if (blank(a) || blank(b)) return blank(a) - blank(b) || i - j;
     const c = typeof a === 'number' && typeof b === 'number'
-      ? a - b : String(a).localeCompare(String(b), 'en-GB', { numeric: true, sensitivity: 'base' });
+      ? a - b : String(a).localeCompare(String(b), LOCALE, { numeric: true, sensitivity: 'base' });
     return c * dir || i - j;
   }).map(([, , r]) => r);
 }
@@ -520,7 +528,7 @@ function groupTree(records, dims) {
         }
       }
       n.children = [...by].map(([v, rs]) => node(v, [...path, v], rs))
-        .sort((a, b) => b.size - a.size || a.label.localeCompare(b.label, 'en-GB', { numeric: true }));
+        .sort((a, b) => b.size - a.size || a.label.localeCompare(b.label, LOCALE, { numeric: true }));
       n.size = n.children.reduce((s, c) => s + c.size, 0);
     }
     return n;
@@ -818,10 +826,10 @@ function render() {
   document.getElementById('glpi-link').href = safeUrl(snap.glpi_url);
   const at = new Date(snap.refreshed_at);
   document.getElementById('updated').textContent =
-    `Updated ${at.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })} (refreshed every ${Math.round(snap.refresh_seconds / 60)} min)`;
+    `Updated ${at.toLocaleString(LOCALE, { dateStyle: 'medium', timeStyle: 'short' })} (refreshed every ${Math.round(snap.refresh_seconds / 60)} min)`;
   const err = document.getElementById('error');
   err.hidden = !snap.error;
-  err.textContent = snap.error ? `Last refresh from GLPI failed - showing the data from ${at.toLocaleTimeString('en-GB')}. ${snap.error}` : '';
+  err.textContent = snap.error ? `Last refresh from GLPI failed - showing the data from ${at.toLocaleTimeString(LOCALE)}. ${snap.error}` : '';
 
   document.getElementById('summary').replaceChildren(...snap.summary.map(tile));
   document.getElementById('quality').replaceChildren(...snap.quality.map(tile));
@@ -919,7 +927,7 @@ const searchHash = (q, closed) => '#search=' + encodeURIComponent(q) + (closed ?
 function showSearchData() {
   const text = document.getElementById('search-data-text');
   if (!snap) { text.textContent = 'Searching the data from the last refresh of GLPI.'; return; }
-  const at = new Date(snap.refreshed_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+  const at = new Date(snap.refreshed_at).toLocaleString(LOCALE, { dateStyle: 'medium', timeStyle: 'short' });
   text.textContent = snap.error
     ? `Searching the data read from GLPI at ${at}: the last refresh failed.`
     : `Searching the data read from GLPI at ${at}.`;
