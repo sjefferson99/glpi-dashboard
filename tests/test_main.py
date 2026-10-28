@@ -1,5 +1,6 @@
 """The FastAPI app end to end, against the fake GLPI: refresh loop, endpoints, health, headers."""
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -280,3 +281,33 @@ def test_page_title_and_language_are_configurable_and_escaped(client, monkeypatc
 
 def test_page_answers_head(client):
     assert client.head("/").status_code == 200
+
+
+def test_an_area_matching_no_category_is_logged_once(client, monkeypatch, caplog):
+    monkeypatch.setattr(main, "MANUAL_MIN_SECONDS", 0)
+    monkeypatch.setattr(main, "unmatched_areas", [])
+    monkeypatch.setattr(main, "RISK_AREAS", {"security": 15, "Uncategorised": 5})
+    monkeypatch.setattr(main, "STANDARD_CHANGE_AREA", "Standard Changes")
+    client.post("/api/refresh")
+    warnings = [r.getMessage() for r in caplog.records if "no top-level ITIL category" in r.getMessage()]
+    assert warnings == ["no top-level ITIL category in GLPI is named 'Standard Changes', 'security' "
+                        "(RISK_AREAS / STANDARD_CHANGE_AREA): names must match exactly, case included"]
+    caplog.clear()
+    client.post("/api/refresh")
+    assert "no top-level ITIL category" not in caplog.text        # unchanged, so not repeated
+
+
+def test_areas_that_match_are_not_logged(client, monkeypatch, caplog):
+    monkeypatch.setattr(main, "MANUAL_MIN_SECONDS", 0)
+    monkeypatch.setattr(main, "unmatched_areas", [])
+    monkeypatch.setattr(main, "RISK_AREAS", {"Security": 15, "Uncategorised": 5})
+    monkeypatch.setattr(main, "STANDARD_CHANGE_AREA", "")
+    client.post("/api/refresh")
+    assert "no top-level ITIL category" not in caplog.text
+
+
+def test_compose_time_zone_is_not_taken_from_the_shell():
+    # Compose interpolates from the deploying shell before .env, and shells may export TZ.
+    compose = (Path(__file__).parent.parent / "compose.yml").read_text(encoding="utf-8")
+    assert "TZ: ${GLPI_TZ:-Europe/London}" in compose
+    assert "${TZ" not in compose

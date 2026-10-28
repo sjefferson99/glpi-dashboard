@@ -170,13 +170,14 @@ Copy `.env.example` to `.env` and fill it in. Keep `.env` readable only by admin
 | `INTERNET_FACING_EXTRA` | Further comma-separated CI names that are internet-facing (default none) |
 
 These are optional, for fitting the page to your GLPI. A value that doesn't parse logs a warning and keeps the
-default, so a typo never stops the dashboard.
+default, so a typo never stops the dashboard. Area names must match a top-level ITIL category exactly, case
+included; each refresh logs a warning naming any that match none.
 
 | Variable | Meaning |
 |---|---|
 | `DASHBOARD_TITLE` | The page title and heading (default `Network state`) |
 | `LOCALE` | Language tag for dates, times and sorting on the page, e.g. `en-US` (default `en-GB`) |
-| `TZ` | GLPI's time zone, so ages and dates match GLPI's (default `Europe/London`, set in `compose.yml`) |
+| `GLPI_TZ` | GLPI's time zone, so ages and dates match GLPI's (default `Europe/London`). `compose.yml` hands it to the container as `TZ`; it's named apart so a `TZ` set in your shell can't override it |
 | `RISK_AREAS` | Extra risk points per area, as comma-separated `Area:points` (default `Security:15`; empty for none). GLPI has nowhere to keep a weight on a category, so it's set here |
 | `STANDARD_CHANGE_AREA` | The top-level category of pre-approved changes, left out of the risks, the areas and the change checks (default `Standard change`; empty for none) |
 | `STALE_DAYS` | Days without an update before an open record counts as stale (default 30) |

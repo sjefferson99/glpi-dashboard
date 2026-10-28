@@ -15,7 +15,9 @@ services:
     # GLPI_APP_TOKEN, GLPI_USER_TOKEN and the rest: copy .env.example to .env (keep it readable only by admins)
     env_file: .env
     environment:
-      TZ: ${TZ:-Europe/London}       # GLPI's time zone, so ages and dates match it; set TZ in .env to change it
+      # GLPI's time zone, so ages and dates match it. Set GLPI_TZ in .env, not TZ: Compose would take a TZ
+      # exported in the deploying shell over the one in .env.
+      TZ: ${GLPI_TZ:-Europe/London}
     # The page shows internal GLPI data and has no login of its own: publish it only to localhost,
     # and put an authenticating reverse proxy in front for anything else (example below).
     ports:

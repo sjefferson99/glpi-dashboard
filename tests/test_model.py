@@ -515,3 +515,9 @@ def test_area_names_make_safe_list_keys():
     data["Ticket"][1]["itilcategories_id"] = 6
     keys = {a["incidents_list"] for a in build(data)["health"]["areas"]}
     assert "area-backup-restore-incidents" in keys
+
+
+def test_areas_are_the_top_level_categories_and_uncategorised():
+    assert model.areas(dataset()["ITILCategory"]) == {"Security", "Network", "Standard change", "Hosting",
+                                                       "Uncategorised"}
+    assert model.areas([]) == {"Uncategorised"}

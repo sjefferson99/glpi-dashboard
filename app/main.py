@@ -106,6 +106,7 @@ MANUAL_MIN_SECONDS = 30
 
 state = {"snapshot": None, "search": None, "explorer": None, "error": None, "refreshed_at": None}
 refresh_lock = asyncio.Lock()
+unmatched_areas = []      # what check_areas() last warned about
 
 
 def make_client():
@@ -153,9 +154,28 @@ async def collect(glpi):
     return data
 
 
+def check_areas(categories):
+    """Warns about any area in ``RISK_AREAS`` or ``STANDARD_CHANGE_AREA`` that isn't an area in GLPI.
+
+    Names must match a top-level category exactly, case included, so a typo would otherwise just do nothing.
+    The warning is logged when the set of unmatched names changes, not at every refresh.
+
+    Args:
+        categories: ``ITILCategory`` rows, with ``completename``.
+    """
+    global unmatched_areas
+    configured = set(RISK_AREAS) | ({STANDARD_CHANGE_AREA} if STANDARD_CHANGE_AREA else set())
+    unmatched = sorted(configured - model.areas(categories))
+    if unmatched and unmatched != unmatched_areas:
+        log.warning("no top-level ITIL category in GLPI is named %s (RISK_AREAS / STANDARD_CHANGE_AREA): "
+                    "names must match exactly, case included", ", ".join(map(repr, unmatched)))
+    unmatched_areas = unmatched
+
+
 async def refresh(glpi):
     """Rebuilds the snapshot, the search index and the explorer's records from GLPI and clears any recorded error."""
     data = await collect(glpi)
+    check_areas(data["ITILCategory"])
     now = datetime.now()
     builder = model.Builder(data, now, GLPI_PUBLIC_URL, INTERNET_ROOTS, INTERNET_EXTRA, risk_areas=RISK_AREAS,
                             standard_change_area=STANDARD_CHANGE_AREA, stale_days=STALE_DAYS)

@@ -28,6 +28,7 @@ CHANGE_WORKING = (7, 11, 12)      # Accepted, Testing, Qualification
 VALIDATION_WAITING = 2           # Change.global_validation: 1 none, 2 waiting, 3 accepted, 4 refused
 
 STANDARD_CHANGE_AREA = "Standard change"   # pre-approved changes: no risk score, no area, no change checks
+UNCATEGORISED = "Uncategorised"            # the area of a record with no category
 
 # Record quality: what the GLPI working rules expect every open record to have.
 STALE_DAYS = 30
@@ -85,6 +86,20 @@ def _snippet(text, terms):
     at = min(found)
     start, end = max(at - SNIPPET_BEFORE, 0), min(at + SNIPPET_AFTER, len(text))
     return ("…" if start else "") + text[start:end].strip() + ("…" if end < len(text) else "")
+
+
+def _area(category):
+    """Returns the area of an ITIL category's full name: its top level, or ``UNCATEGORISED`` for none."""
+    return category.split(" > ")[0] if category else UNCATEGORISED
+
+
+def areas(categories):
+    """Returns every area records can have: each top-level ITIL category, plus ``UNCATEGORISED``.
+
+    Args:
+        categories: ``ITILCategory`` rows, with ``completename``.
+    """
+    return {_area(c.get("completename") or "") for c in categories} | {UNCATEGORISED}
 
 
 def _rag(items):
@@ -224,7 +239,7 @@ class Builder:
                     "status_id": r["status"], "open": r["status"] not in done[itemtype],
                     "priority": r["priority"], "priority_name": PRIORITY.get(r["priority"], "?"),
                     "urgency": r["urgency"], "impact": r["impact"],
-                    "category": category, "area": category.split(" > ")[0] if category else "Uncategorised",
+                    "category": category, "area": _area(category),
                     "date": opened.date().isoformat(), "age_days": max((self.now - opened).days, 0),
                     "updated": updated.date().isoformat() if updated else None,
                     "url": f"{self.url}/front/{FORM[itemtype]}.form.php?id={r['id']}",
