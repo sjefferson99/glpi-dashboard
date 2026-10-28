@@ -106,7 +106,7 @@ when each record was opened and last updated.
 Every table sorts by any column: click a header, and click again to reverse. Tables show 10 rows, with
 **Show more** and **Show all** below, and **Show less** to go back to 10. Escape, ✕ or a click outside a list closes it.
 
-**Search**: the box at the top right, beside the update time, searches the open tickets, problems and changes,
+**Search**: the box at the top right, beside Refresh now, searches the open tickets, problems and changes,
 the projects and the CIs the dashboard read. Tick **Include closed** to search closed records too. It's off by
 default, which also keeps searches quicker. Pause typing for half a second, or press Enter, and the results open over
 the page. They have their own search box (✕ clears it) and Include closed, to refine them, and say which refresh
@@ -135,9 +135,10 @@ for the Record explorer at `/api/explorer`; the page asks for that only while th
 
 - **If GLPI is unreachable**, the last snapshot stays, with a banner.
 - **`/healthz`** fails once the data is three refreshes old.
-- **Refresh now** (the circular-arrows button at the top right, beside the update time; `POST /api/refresh`)
+- **Refresh now** (the circular-arrows button at the top right; `POST /api/refresh`)
   re-reads GLPI at once, at most every 30 s
   (`MANUAL_MIN_SECONDS`). A click during a running refresh waits for it.
+- **When the data was last read**, and how often it's refreshed, is in the page footer, with a link to GLPI.
 
 It uses the **GLPI v1 API only** (`app/glpi.py`), because v2 has no endpoints for the links between records
 and CIs or projects. A refresh makes about 30 calls.

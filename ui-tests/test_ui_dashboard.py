@@ -1041,33 +1041,44 @@ def test_heat_gets_deeper_with_priority_and_both_styles_have_six_colours(page: P
 
 # --- header ---------------------------------------------------------------------------------------------------
 
-def test_header_puts_updated_and_refresh_right_on_the_titles_baseline(page: Page, dashboard):
-    page.set_viewport_size({"width": 1100, "height": 800})
+def test_header_puts_search_refresh_and_theme_right_on_the_titles_baseline(page: Page, dashboard):
+    page.set_viewport_size({"width": 1024, "height": 800})
     open_page(page)
+    header = page.get_by_role("banner")
+    expect(header.get_by_role("button", name="Refresh now")).to_be_visible()
+    expect(header.get_by_role("group", name="Theme")).to_be_visible()
+    expect(header.locator("#updated")).to_have_count(0)
     title = page.locator("h1").bounding_box()
-    meta = page.locator(".top .meta").bounding_box()
-    assert meta["x"] > title["x"] + title["width"]                   # to the right of the title
+    search = page.locator(".top .search").bounding_box()
+    actions = page.locator(".top .actions").bounding_box()
+    assert search["x"] > title["x"] + title["width"]                 # one line: title, search, then the buttons
+    assert actions["x"] > search["x"] + search["width"]
     top = page.locator(".top").bounding_box()
-    assert abs((meta["x"] + meta["width"]) - (top["x"] + top["width"] - 16)) < 2   # right-aligned, inside the padding
-    assert abs((meta["y"] + meta["height"]) - (title["y"] + title["height"])) < 2     # bottoms line up
-    assert float(page.locator(".top .meta").evaluate("e => parseFloat(getComputedStyle(e).fontSize)")) < 14
+    assert abs((actions["x"] + actions["width"]) - (top["x"] + top["width"] - 16)) < 2   # right-aligned, inside the padding
+    for box in (search, actions):
+        assert abs((box["y"] + box["height"]) - (title["y"] + title["height"])) < 2   # bottoms line up
 
 
-def test_search_box_gives_way_before_the_update_time_wraps(page: Page, dashboard):
-    """At the narrowest width where the title, a 120px search box and the update time fit, they share one line."""
+def test_update_time_and_glpi_link_are_in_the_footer_below_the_page(page: Page, dashboard):
     open_page(page)
-    width = page.evaluate("""() => {
-      const w = (s) => document.querySelector(s).getBoundingClientRect().width;
-      const gap = (s) => parseFloat(getComputedStyle(document.querySelector(s)).columnGap);
-      const scrollbar = window.innerWidth - document.documentElement.clientWidth;
-      return Math.ceil(32 + scrollbar + w('h1') + w('.top .meta') + 2 * gap('.top')
-        + 120 + gap('.top .search') + w('.top .search .check')) + 2;
-    }""")
+    footer = page.get_by_role("contentinfo")
+    expect(footer).to_contain_text(re.compile(r"Updated .+ \(refreshed every \d+ min\) · from GLPI"))
+    link = footer.get_by_role("link", name="GLPI")
+    expect(link).to_have_attribute("href", PUBLIC_URL + "/")
+    expect(link).to_have_attribute("target", "_blank")
+    assert footer.bounding_box()["y"] >= page.locator("main").bounding_box()["y"] + page.locator("main").bounding_box()["height"]
+    assert float(footer.locator(".meta").evaluate("e => parseFloat(getComputedStyle(e).fontSize)")) < 14
+
+
+@pytest.mark.parametrize("width", [320, 375, 768, 1024])
+def test_no_sideways_scroll(page: Page, dashboard, width):
     page.set_viewport_size({"width": width, "height": 800})
-    title = page.locator("h1").bounding_box()
-    meta = page.locator(".top .meta").bounding_box()
-    assert meta["x"] > title["x"] + title["width"]                   # still to the right of the title
-    assert 120 <= page.locator("#search").bounding_box()["width"] < 140
+    open_page(page)
+    assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
+    for name in ("Refresh now", "System theme", "Light theme", "Dark theme"):
+        box = page.get_by_role("button", name=name).bounding_box()
+        assert box["x"] >= 0 and box["x"] + box["width"] <= width, name
+
 
 def test_refresh_is_an_icon_button_with_a_name(page: Page, dashboard):
     open_page(page)
