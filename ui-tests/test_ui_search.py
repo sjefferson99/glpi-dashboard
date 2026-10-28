@@ -40,14 +40,14 @@ def search(page: Page, q):
     expect(page.locator("#list-count")).not_to_have_text("Searching…")
 
 
-def test_the_search_box_sits_in_the_header_beside_the_update_time(page: Page, dashboard):
+def test_the_search_box_sits_in_the_header_beside_refresh(page: Page, dashboard):
     page.set_viewport_size({"width": 1280, "height": 800})
     open_page(page)
     expect(page.locator("header").get_by_label("Search records, projects and CIs")).to_be_visible()
-    search_box, updated = box(page).bounding_box(), page.locator("#updated").bounding_box()
+    search_box, refresh = box(page).bounding_box(), page.locator("#refresh").bounding_box()
     title = page.locator("h1").bounding_box()
-    assert search_box["x"] > title["x"] + title["width"] and search_box["x"] + search_box["width"] < updated["x"]
-    assert abs((search_box["y"] + search_box["height"]) - (updated["y"] + updated["height"])) < 12   # one row
+    assert search_box["x"] > title["x"] + title["width"] and search_box["x"] + search_box["width"] < refresh["x"]
+    assert abs((search_box["y"] + search_box["height"]) - (refresh["y"] + refresh["height"])) < 12   # one row
     tabs = page.get_by_role("tablist").bounding_box()
     assert search_box["y"] + search_box["height"] <= tabs["y"]
 

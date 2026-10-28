@@ -18,7 +18,7 @@
              autocomplete="off" spellcheck="false">
       <label class="check"><input id="search-closed" type="checkbox"> Include closed</label>
     </form>
-    <p class="meta"><span id="updated">Loading…</span> · from <a id="glpi-link" href="#" target="_blank" rel="noopener">GLPI</a>
+    <div class="actions">
       <button id="refresh" class="icon-btn refresh" type="button" aria-label="Refresh now" title="Refresh now">
         <svg class="refresh-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 3v5h5"/>
@@ -45,7 +45,8 @@
             <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>
           </svg>
         </button>
-      </span></p>
+      </span>
+    </div>
   </header>
   <div id="error" class="banner" role="alert" hidden></div>
 
@@ -142,6 +143,10 @@
       </details>
     </section>
   </main>
+
+  <footer class="foot">
+    <p class="meta"><span id="updated">Loading…</span> · from <a id="glpi-link" href="#" target="_blank" rel="noopener">GLPI</a></p>
+  </footer>
 
   <dialog id="list" aria-labelledby="list-title">
     <div class="dialog-head">
