@@ -322,6 +322,9 @@ class _Demo:
             p = next((p for p in problems if c["_fixes"] and p["name"].startswith(c["_fixes"])), None)
             if p:
                 cp.append((c["id"], p["id"]))
+                # Mentioning the problem by id, as people do, gives an #id search something to find in text.
+                end = "&lt;/p&gt;" if c["content"].endswith("&lt;/p&gt;") else "</p>"
+                c["content"] = c["content"].removesuffix(end) + f" Fixes problem #{p['id']}." + end
         d["Problem_Ticket"] = [{"id": n, "problems_id": p, "tickets_id": t} for n, (p, t) in enumerate(pt, 1)]
         d["Change_Problem"] = [{"id": n, "changes_id": c, "problems_id": p} for n, (c, p) in enumerate(cp, 1)]
 

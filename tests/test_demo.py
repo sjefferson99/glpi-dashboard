@@ -111,6 +111,12 @@ def test_the_explorer_and_search_have_history_to_show(demo):
     assert any(r.get("snippet") for r in found["results"])
 
 
+def test_an_id_search_finds_several_types_and_a_mention(demo):
+    found = demo.get("/api/search", params={"q": "#3"}).json()
+    assert {r["kind"] for r in found["ids"]} >= {"Problem", "Change", "Project", "CI"}
+    assert any("problem #3" in r["snippet"].lower() for r in found["results"])
+
+
 def test_a_frozen_clock_stops_the_apps_time_at_the_datasets_date(app_state, fake, monkeypatch):
     """scripts/demo.py serves this way, so "Updated" and every age read the same in shots taken months apart."""
     monkeypatch.setattr(main, "datetime", frozen(DEMO_NOW))
