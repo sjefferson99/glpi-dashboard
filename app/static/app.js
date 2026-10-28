@@ -168,7 +168,9 @@ function marked(text, words) {
   if (!words.length) { frag.append(text); return frag; }
   // Longest first: the regex takes the first alternative that matches, so `db` would hide `db1`.
   const longest = [...words].sort((a, b) => b.length - a.length);
-  const re = new RegExp(longest.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'gi');
+  // An #id word marks only that whole number, as the server matches it: #12, not the start of #123.
+  const re = new RegExp(longest.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + (ID_WORD.test(w) ? '(?!\\d)' : ''))
+    .join('|'), 'gi');
   let at = 0;
   for (const m of text.matchAll(re)) {
     frag.append(text.slice(at, m.index), el('mark', { text: m[0] }));
@@ -918,7 +920,7 @@ function showList() {
     `${rows.length} ${kind.noun[rows.length === 1 ? 0 : 1]} - each opens in GLPI`;
   // A freshly opened list starts unsorted and short; a re-render while it's open keeps its state.
   if (!dlg.open) views.delete('list:' + key);
-  grid(dlg.querySelector('table'), 'list:' + key, kind.columns, rows);
+  grid(document.getElementById('list-table'), 'list:' + key, kind.columns, rows);
   if (!dlg.open) dlg.showModal();
 }
 
@@ -927,6 +929,8 @@ function showList() {
 const SEARCH_MIN = 2;
 const SEARCH_MAX = 100;
 const SEARCH_DELAY_MS = 500;
+// A search word naming a record's id, e.g. #12; the server finds that id in every type.
+const ID_WORD = /^#\d+$/;
 const searchBox = document.getElementById('search');
 const listSearch = document.getElementById('list-search');
 // Include closed, beside each box; the two always agree. Off by default: a search over open records only is
@@ -944,9 +948,21 @@ function setSearchMode(on) {
   document.getElementById('search-data').hidden = !on;
   document.getElementById('list').classList.toggle('searching', on);
   if (!on) {
+    showIdParts(false);
     searchDrawn = null;
     ++searchSeq;      // a search still on its way must not draw over the list that replaced it
   }
+}
+
+/**
+ * Splits the results in two for a search with an #id in it: the records with that id above, headed ID matches,
+ * and the rest below, headed Text matches. Without one, the dialog has its usual single table.
+ * @param {boolean} on
+ */
+function showIdParts(on) {
+  document.getElementById('search-ids').hidden = !on;
+  document.getElementById('search-text-title').hidden = !on;
+  document.getElementById('list-table').setAttribute('aria-labelledby', on ? 'search-text-title' : 'list-title');
 }
 
 /** The hash for a search: `#search=<query>`, plus `&closed=1` to include closed records. */
@@ -971,7 +987,7 @@ function showSearchData() {
 async function showSearch(q, closed) {
   const dlg = document.getElementById('list');
   const count = document.getElementById('list-count');
-  const table = dlg.querySelector('table');
+  const table = document.getElementById('list-table');
   setSearchMode(true);
   document.getElementById('list-title').textContent = 'Search';
   for (const b of closedBoxes) b.checked = closed;
@@ -992,6 +1008,7 @@ async function showSearch(q, closed) {
   if (q.trim().length < SEARCH_MIN) {
     count.textContent = `Type at least ${SEARCH_MIN} characters to search.`;
     searchWords = [];
+    showIdParts(false);
     grid(table, 'search', SEARCH_COLUMNS, []);
     return;
   }
@@ -1002,16 +1019,26 @@ async function showSearch(q, closed) {
     if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
     if (seq !== searchSeq) return;
     // A new query starts unsorted and short; the same one, re-fetched after a refresh, keeps its state.
-    if (views.get('search')?.asked !== asked) views.set('search', { col: -1, dir: 1, shown: PAGE, asked });
+    for (const id of ['search', 'search-ids']) {
+      if (views.get(id)?.asked !== asked) views.set(id, { col: -1, dir: 1, shown: PAGE, asked });
+    }
     searchWords = q.toLowerCase().split(/\s+/).filter(Boolean);
+    const byId = searchWords.some((w) => ID_WORD.test(w));
+    showIdParts(byId);
+    grid(document.getElementById('search-ids').querySelector('table'), 'search-ids', SEARCH_COLUMNS, body.ids);
     grid(table, 'search', SEARCH_COLUMNS, body.results);
+    /** `n matches`, with `what` (e.g. 'ID ') before the noun. */
+    const matches = (k, what) => `${k} ${what}${k === 1 ? 'match' : 'matches'}`;
     const n = body.results.length;
-    count.textContent = body.total === 0 ? 'No matches.'
-      : `${body.total} ${body.total === 1 ? 'match' : 'matches'}${body.total > n ? ` - showing the best ${n}; add words to narrow it` : ''} - each opens in GLPI`;
+    const found = matches(body.total, byId ? 'text ' : '')
+      + (body.total > n ? ` - showing the best ${n}; add words to narrow it` : '');
+    count.textContent = body.total + body.ids.length === 0 ? 'No matches.'
+      : `${byId ? matches(body.ids.length, 'ID ') + ', ' : ''}${found} - each opens in GLPI`;
   } catch (e) {
     if (seq !== searchSeq) return;
     searchDrawn = null;
     searchWords = [];
+    showIdParts(false);
     grid(table, 'search', SEARCH_COLUMNS, []);     // not the last query's results under this one
     count.textContent = `Search failed: ${e.message}`;
   }

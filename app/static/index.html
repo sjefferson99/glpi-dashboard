@@ -166,7 +166,12 @@
         </svg>
       </button></p>
     <p id="list-count" class="meta" aria-live="polite"></p>
-    <div class="scroll"><table class="grid" aria-labelledby="list-title"><tbody id="list-rows"></tbody></table></div>
+    <section id="search-ids" aria-labelledby="search-ids-title" hidden>
+      <h3 id="search-ids-title">ID matches</h3>
+      <div class="scroll"><table class="grid" aria-labelledby="search-ids-title"><tbody id="search-id-rows"></tbody></table></div>
+    </section>
+    <h3 id="search-text-title" hidden>Text matches</h3>
+    <div class="scroll"><table id="list-table" class="grid" aria-labelledby="list-title"><tbody id="list-rows"></tbody></table></div>
   </dialog>
 </body>
 </html>

@@ -440,3 +440,68 @@ def test_the_results_stay_put_as_they_grow_and_shrink(page: Page, dashboard):
     page.get_by_role("link", name=re.compile(r"^Open incidents: \d+$")).click()
     expect(page.locator("#list-title")).to_have_text("Open incidents")
     assert dialog(page).bounding_box()["y"] > top          # ordinary lists stay centred
+
+
+def id_rows(page: Page):
+    return page.locator("#search-id-rows tr")
+
+
+def test_an_id_shows_that_id_in_every_type_above_the_text_matches(page: Page, dashboard):
+    dashboard.data["Change"][2]["content"] = "<p>Reverts the fix in #1, not #12.</p>"
+    open_page(page)
+    page.locator("#refresh").click()
+    expect(page.locator("#refresh")).to_be_enabled()
+    search(page, "#1")
+    ids = page.get_by_role("table", name="ID matches")
+    expect(ids.locator("tbody .chip")).to_have_count(6)
+    assert sorted(ids.locator("tbody .chip").all_inner_texts()) == [
+        "Appliance #1", "Change #1", "Computer #1", "Incident #1", "Problem #1", "Project #1"]
+    text = page.get_by_role("table", name="Text matches")
+    expect(text.locator("tbody .chip")).to_have_text(["Change #3"])
+    expect(text.locator("td.snippet mark")).to_have_text(["#1"])         # not the #1 in #12
+    expect(page.locator("#list-count")).to_have_text("6 ID matches, 1 text match - each opens in GLPI")
+    assert ids.bounding_box()["y"] < text.bounding_box()["y"]
+
+
+def test_an_id_is_found_even_when_closed_records_are_left_out(page: Page, dashboard):
+    open_page(page)
+    search(page, "#4")
+    expect(dialog(page).get_by_label("Include closed")).not_to_be_checked()
+    expect(id_rows(page).locator(".chip")).to_have_text(["Incident #4", "Change #4"])
+    expect(id_rows(page).first).to_contain_text("Closed")
+    expect(results(page)).to_have_text(["None"])
+
+
+def test_an_id_no_record_has_says_so(page: Page, dashboard):
+    open_page(page)
+    search(page, "#999")
+    expect(page.get_by_role("heading", name="ID matches")).to_be_visible()
+    expect(id_rows(page)).to_have_text(["None"])
+    expect(page.locator("#list-count")).to_have_text("No matches.")
+
+
+def test_a_search_without_an_id_has_one_table(page: Page, dashboard):
+    open_page(page)
+    search(page, "#1")
+    expect(page.get_by_role("heading", name="ID matches")).to_be_visible()
+    page.locator("#list-search").fill("db1")
+    page.keyboard.press("Enter")
+    expect(page.locator("#list-count")).to_contain_text("matches - each opens in GLPI")
+    expect(page.get_by_role("heading", name="ID matches")).to_be_hidden()
+    expect(page.get_by_role("heading", name="Text matches")).to_be_hidden()
+    expect(page.locator("#list-table")).to_have_attribute("aria-labelledby", "list-title")
+
+
+def test_a_list_after_an_id_search_has_no_id_section(page: Page, dashboard):
+    open_page(page)
+    search(page, "#1")
+    page.keyboard.press("Escape")
+    page.get_by_role("link", name=re.compile(r"^Open incidents: \d+$")).click()
+    expect(page.locator("#list-title")).to_have_text("Open incidents")
+    expect(page.locator("#search-ids")).to_be_hidden()
+    expect(page.get_by_role("heading", name="Text matches")).to_be_hidden()
+
+
+def test_a_bookmarked_id_search_opens_on_load(page: Page, dashboard):
+    open_page(page, "/#search=%231")
+    expect(id_rows(page)).to_have_count(6)

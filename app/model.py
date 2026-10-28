@@ -56,6 +56,7 @@ PLAIN_ITEMTYPE = re.compile(r"[A-Za-z_]+")
 SEARCH_MIN, SEARCH_MAX, SEARCH_LIMIT = 2, 100, 100
 SNIPPET_BEFORE, SNIPPET_AFTER = 60, 140
 SPACE = re.compile(r"\s+")
+ID_WORD = re.compile(r"#(\d+)")     # a search word naming an id, e.g. "#12"
 
 
 def _date(s):
@@ -78,9 +79,19 @@ def _blank(html_text):
     return not _plain(html_text)
 
 
+def _pattern(term):
+    """Returns the regex a search word matches: the word itself, but an ``#id`` only as a whole number."""
+    return re.escape(term) + (r"(?!\d)" if ID_WORD.fullmatch(term) else "")
+
+
+def _has(term, text):
+    """Says whether lower-cased ``text`` holds a search word: ``#12`` is in ``see #12.`` but not in ``#123``."""
+    return re.search(_pattern(term), text) is not None if ID_WORD.fullmatch(term) else term in text
+
+
 def _snippet(text, terms):
     """Returns the part of ``text`` around the first of ``terms`` found in it, or ``""`` if none is."""
-    found = [m.start() for t in terms if (m := re.search(re.escape(t), text, re.IGNORECASE))]
+    found = [m.start() for t in terms if (m := re.search(_pattern(t), text, re.IGNORECASE))]
     if not found:
         return ""
     at = min(found)
@@ -594,11 +605,11 @@ class Builder:
 
         Returns:
             Entries as ``search()`` shows them, each with ``_hay``, the lower-cased text searched; ``_text``, the
-            description as plain text, for snippets; and ``_tag``, its ``#id``, which ranks an exact id first.
+            description as plain text, for snippets; and ``_id``, its GLPI id, which an ``#id`` search finds.
         """
         def entry(fields, text, *more):
             hay = " ".join([fields["ref"], fields["name"], fields["category"], fields["status"], *more, text])
-            return {**fields, "_hay": hay.lower(), "_text": text, "_tag": "#" + fields["ref"].rsplit("#", 1)[-1]}
+            return {**fields, "_hay": hay.lower(), "_text": text, "_id": int(fields["ref"].rsplit("#", 1)[-1])}
 
         out = []
         for r in self.records.values():
@@ -627,37 +638,45 @@ class Builder:
 
 
 def search(index, query, closed=False, limit=SEARCH_LIMIT):
-    """Finds the entries that contain every word of a query, best first.
+    """Finds the entries with an id the query names, and apart from those, the entries holding every word.
 
-    Matching is by substring, ignoring case, over the reference, title, category, status, linked CI names
-    (and a CI's serial and inventory numbers) and description. An exact ``#id`` comes first, then entries
-    whose title has every word, then anything but a closed record, each most recently updated first.
+    A word like ``#12`` names an id. GLPI ids are unique only within a type, so every entry with that id is an
+    id match, whatever its type, closed or not: asking for an id is asking for that record.
+
+    Text matching is by substring, ignoring case, over the reference, title, category, status, linked CI names
+    (and a CI's serial and inventory numbers) and description, except that an ``#id`` word matches only that
+    whole number, so ``#12`` finds records that mention ``#12`` but not ``#123``. Entries whose title has every
+    word come first, then anything but a closed record, each most recently updated first.
 
     Args:
         index: Entries from ``Builder.search_index()``.
         query: What was typed. Shorter than ``SEARCH_MIN`` once trimmed, it matches nothing.
-        closed: Include closed records. Projects and CIs are always included.
-        limit: The most results to return.
+        closed: Include closed records in the text matches. Projects and CIs are always included.
+        limit: The most text matches to return.
 
     Returns:
-        ``query``, the ``total`` number of matches, and the first ``limit`` of them as ``results``. A result
-        whose title lacks a word has a ``snippet`` of its description around the first word found there.
+        ``query``; ``ids``, the id matches, in the index's order; the ``total`` number of text matches; and the
+        first ``limit`` of them as ``results``. A text match whose title lacks a word has a ``snippet`` of its
+        description around the first word found there.
     """
     # lower(), not casefold(): the snippet (re.IGNORECASE) and the page's highlighting (toLowerCase) match the same
     # way, so a hit always comes back with its words shown. casefold() would match "strasse" to "Straße" unseen.
     terms = query.lower().split()
     if len(query.strip()) < SEARCH_MIN:
-        return {"query": query, "total": 0, "results": []}
-    hits = [e for e in index if (closed or e["open"] is not False) and all(t in e["_hay"] for t in terms)]
+        return {"query": query, "ids": [], "total": 0, "results": []}
+    wanted = {int(m[1]) for t in terms if (m := ID_WORD.fullmatch(t))}
+    hits = [e for e in index if e["_id"] not in wanted and (closed or e["open"] is not False)
+            and all(_has(t, e["_hay"]) for t in terms)]
     hits.sort(key=lambda e: e["updated"] or e["date"] or "", reverse=True)
-    hits.sort(key=lambda e: (e["_tag"] not in terms, not all(t in e["name"].lower() for t in terms),
-                             e["open"] is False))
-    results = []
-    for e in hits[:limit]:
-        missing = [t for t in terms if t not in e["name"].lower()]
-        results.append({**{f: v for f, v in e.items() if not f.startswith("_")},
-                        "snippet": _snippet(e["_text"], missing) if missing else ""})
-    return {"query": query, "total": len(hits), "results": results}
+    hits.sort(key=lambda e: (not all(_has(t, e["name"].lower()) for t in terms), e["open"] is False))
+
+    def shown(e):
+        missing = [t for t in terms if not _has(t, e["name"].lower())]
+        return {**{f: v for f, v in e.items() if not f.startswith("_")},
+                "snippet": _snippet(e["_text"], missing) if missing else ""}
+
+    return {"query": query, "ids": [{**shown(e), "snippet": ""} for e in index if e["_id"] in wanted],
+            "total": len(hits), "results": [shown(e) for e in hits[:limit]]}
 
 
 def build(data, now, glpi_url, internet_roots=(), internet_extra=(), **settings):

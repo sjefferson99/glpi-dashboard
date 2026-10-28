@@ -94,12 +94,48 @@ def test_search_covers_category_status_cis_and_serials(idx):
     assert refs(model.search(idx, "prj1")) == ["Project #1"]              # project code
 
 
-def test_an_exact_id_comes_first(idx):
+def test_an_id_finds_that_id_in_every_type(idx):
+    r = model.search(idx, "#1")
+    assert [e["ref"] for e in r["ids"]] == ["Incident #1", "Problem #1", "Change #1", "Project #1",
+                                            "Computer #1", "Appliance #1"]
+    assert r["ids"][0]["url"] == PUBLIC_URL + "/front/ticket.form.php?id=1"
+    assert r["total"] == 0 and r["results"] == []
+
+
+def test_an_id_is_found_closed_or_not(idx):
+    r = model.search(idx, "#4")
+    assert [(e["ref"], e["open"]) for e in r["ids"]] == [("Incident #4", False), ("Change #4", True)]
+
+
+def test_records_mentioning_an_id_are_text_matches_below_it():
     data = model_input()
-    data["Ticket"][1]["name"] = "Follow-up to #1"     # T2 mentions #1 in its title
-    r = refs(model.search(index(data), "#1"))
-    assert r[-1] == "Incident #2"
-    assert all(ref.endswith(" #1") for ref in r[:-1]) and len(r) == 7
+    data["Ticket"][1]["name"] = "Follow-up to #1"                       # T2 mentions #1 in its title
+    data["Change"][2]["content"] = "<p>Reverts the fix in #1.</p>"      # C3 in its description
+    data["Change"][3]["content"] = "<p>Needs #12 first.</p>"            # C4 names #12, not #1
+    r = model.search(index(data), "#1")
+    assert "Incident #2" not in [e["ref"] for e in r["ids"]]
+    assert refs(r) == ["Incident #2", "Change #3"]                      # the title match first
+    assert r["total"] == 2
+    assert r["results"][0]["snippet"] == "" and r["results"][1]["snippet"] == "Reverts the fix in #1."
+
+
+def test_an_id_mention_snippet_skips_a_longer_number():
+    assert model._snippet("x" * 200 + " #123 and #12", ["#12"]) == "…" + "x" * 50 + " #123 and #12"
+    assert model._snippet("only #123", ["#12"]) == ""
+
+
+def test_several_ids_and_words_combine():
+    data = model_input()
+    data["Change"][2]["content"] = "<p>Follows #1 and #4 on db1.</p>"
+    r = model.search(index(data), "#1 #4 db1")
+    assert {e["ref"] for e in r["ids"]} == {"Incident #1", "Problem #1", "Change #1", "Project #1", "Computer #1",
+                                           "Appliance #1", "Incident #4", "Change #4"}
+    assert refs(r) == ["Change #3"]                                     # needs every word, ids included
+
+
+def test_only_a_hash_and_digits_is_an_id(idx):
+    for q in ("#x1", "1#", "##1", "#1a", "1"):
+        assert model.search(idx, q)["ids"] == []
 
 
 def test_title_matches_rank_above_other_matches(idx):
@@ -131,7 +167,7 @@ def test_closed_records_rank_last(idx):
 
 def test_short_or_blank_queries_match_nothing(idx):
     for q in ("", " ", "a", " a "):
-        assert model.search(idx, q) == {"query": q, "total": 0, "results": []}
+        assert model.search(idx, q) == {"query": q, "ids": [], "total": 0, "results": []}
 
 
 def test_results_are_capped_but_the_total_is_not(idx):
@@ -166,6 +202,13 @@ def test_search_endpoint(client):
     body = r.json()
     assert body["query"] == "backup" and body["total"] == 1
     assert body["results"][0]["url"] == PUBLIC_URL + "/front/ticket.form.php?id=2"
+
+
+def test_search_endpoint_returns_id_matches_apart(client):
+    body = client.get("/api/search", params={"q": "#4"}).json()
+    assert [e["ref"] for e in body["ids"]] == ["Incident #4", "Change #4"]
+    assert body["total"] == 0
+    assert client.get("/api/search", params={"q": "backup"}).json()["ids"] == []
 
 
 def test_closed_is_off_unless_asked_for(client):
