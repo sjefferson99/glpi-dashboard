@@ -1053,6 +1053,22 @@ def test_header_puts_updated_and_refresh_right_on_the_titles_baseline(page: Page
     assert float(page.locator(".top .meta").evaluate("e => parseFloat(getComputedStyle(e).fontSize)")) < 14
 
 
+def test_search_box_gives_way_before_the_update_time_wraps(page: Page, dashboard):
+    """At the narrowest width where the title, a 120px search box and the update time fit, they share one line."""
+    open_page(page)
+    width = page.evaluate("""() => {
+      const w = (s) => document.querySelector(s).getBoundingClientRect().width;
+      const gap = (s) => parseFloat(getComputedStyle(document.querySelector(s)).columnGap);
+      const scrollbar = window.innerWidth - document.documentElement.clientWidth;
+      return Math.ceil(32 + scrollbar + w('h1') + w('.top .meta') + 2 * gap('.top')
+        + 120 + gap('.top .search') + w('.top .search .check')) + 2;
+    }""")
+    page.set_viewport_size({"width": width, "height": 800})
+    title = page.locator("h1").bounding_box()
+    meta = page.locator(".top .meta").bounding_box()
+    assert meta["x"] > title["x"] + title["width"]                   # still to the right of the title
+    assert 120 <= page.locator("#search").bounding_box()["width"] < 140
+
 def test_refresh_is_an_icon_button_with_a_name(page: Page, dashboard):
     open_page(page)
     btn = page.get_by_role("button", name="Refresh now")
