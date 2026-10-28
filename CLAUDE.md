@@ -71,13 +71,14 @@ That belongs in the issue and the PR.
   - **Don't retake** anything else. That covers screens the change didn't touch, a change to the demo data on
     its own, and a retake "to refresh" one. A retake of an unchanged screen can differ by a few pixels, which
     would add a near-identical copy to history.
-  - Images come only from the demo data (`scripts/demo.py shot`), never a real GLPI. Light theme only, for now:
-    dark ones wait for a dark mode toggle. If a change needs the demo data to show it, extend
+  - Images come only from the demo data (`scripts/demo.py shot`), never a real GLPI. Light theme, apart from the
+    one dark image (`summary-dark.png`). If a change needs the demo data to show it, extend
     `tests/demo_glpi.py`, keeping it generic.
 
   | Image | Command (`.venv\Scripts\python.exe scripts/demo.py shot docs/screenshots/<image> ...`) |
   |---|---|
   | `summary.png` | `--tab Summary` |
+  | `summary-dark.png` | `--tab Summary --theme dark` |
   | `in-flight.png` | `--tab "In flight"` |
   | `recurring.png` | `--tab "Recurring changes"` |
   | `cmdb.png` | `--tab CMDB` |

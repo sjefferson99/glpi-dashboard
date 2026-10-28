@@ -161,7 +161,7 @@ def test_healthz_says_nothing_about_errors(client, fake, monkeypatch):
 
 # --- page and headers -----------------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("path", ["/", "/app.js", "/style.css", "/logo.svg"])
+@pytest.mark.parametrize("path", ["/", "/app.js", "/theme.js", "/style.css", "/logo.svg"])
 def test_static_files_are_served(client, path):
     assert client.get(path).status_code == 200
 

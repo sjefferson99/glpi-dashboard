@@ -90,6 +90,12 @@ change counts on area cards and in the CMDB table. The kind is always written ou
 the only cue, and every colour meets WCAG AA contrast in both light and dark themes. A tile with nothing in
 it is dimmed: no fill, a dashed grey border and a grey number.
 
+**Light and dark themes.** The page follows your system's colour scheme by default. The three buttons at the top
+right, beside Refresh now, pick System, Light or Dark, and the browser remembers the choice (if it can't store
+it, the page stays on System).
+
+![The Summary tab in the dark theme](docs/screenshots/summary-dark.png)
+
 **Every number is a link** (`#list=<key>`) to the list behind it, each entry opening in GLPI. The number is
 computed as the length of that list, so the two can't disagree. (The Record explorer's boxes are grouped in the
 page, each from the same records it lists, so they can't disagree either.) Lists can be bookmarked. Record lists show

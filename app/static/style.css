@@ -148,11 +148,15 @@ h3 { font-size: 0.95rem; margin: 20px 0 6px; color: var(--text-secondary); }
 .icon-btn:hover:not(:disabled) { color: var(--text-primary); border-color: var(--border); }
 .icon-btn:disabled { cursor: progress; }
 .icon-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.refresh-icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round;
+.refresh-icon, .icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round;
                 stroke-linejoin: round; }
 .icon-btn:disabled .refresh-icon { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .icon-btn:disabled .refresh-icon { animation: none; } }
+/* The theme picker: three icon buttons, the chosen one outlined (3:1 against the page in both themes). */
+.theme { display: inline-flex; gap: 2px; vertical-align: middle; margin-left: 8px; }
+.theme .icon-btn { margin-left: 0; }
+.theme .icon-btn[aria-pressed="true"] { color: var(--text-primary); background: var(--surface-1); border-color: var(--focus); }
 .banner { max-width: 1168px; margin: 12px auto; padding: 10px 14px; border-radius: 6px;
           background: var(--banner-bg); border-left: 4px solid var(--critical); }
 

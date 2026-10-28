@@ -1082,3 +1082,125 @@ def test_refresh_icon_holds_still_for_reduced_motion(page: Page, dashboard):
     page.locator("#refresh").click()
     expect(page.locator("#refresh")).to_be_disabled()
     assert page.locator("#refresh svg").evaluate("e => getComputedStyle(e).animationName") == "none"
+
+
+# --- theme ------------------------------------------------------------------------------------------------------
+
+LIGHT_BG, DARK_BG = "rgb(244, 244, 242)", "rgb(17, 17, 16)"     # --surface-0 in each theme
+
+
+def theme_button(page: Page, name):
+    return page.get_by_role("group", name="Theme").get_by_role("button", name=f"{name} theme")
+
+
+def page_bg(page: Page):
+    return _style(page.locator("body"), "backgroundColor")
+
+
+def expect_theme(page: Page, picked):
+    for name in ("System", "Light", "Dark"):
+        expect(theme_button(page, name)).to_have_attribute("aria-pressed", str(name == picked).lower())
+
+
+def test_theme_picker_is_three_named_buttons_with_system_picked(page: Page, dashboard):
+    open_page(page)
+    expect(page.get_by_role("group", name="Theme").get_by_role("button")).to_have_count(3)
+    expect_theme(page, "System")
+    for name in ("System", "Light", "Dark"):
+        btn = theme_button(page, name)
+        expect(btn).to_have_attribute("title", f"{name} theme")
+        expect(btn).to_have_text(re.compile(r"^\s*$"))                 # no visible words, just the icon
+        expect(btn.locator("svg")).to_have_attribute("aria-hidden", "true")
+
+
+@pytest.mark.parametrize("system, choice, bg", [("dark", "Light", LIGHT_BG), ("light", "Dark", DARK_BG)])
+def test_choosing_a_theme_overrides_the_system_and_survives_a_reload(page: Page, dashboard, system, choice, bg):
+    page.emulate_media(color_scheme=system)
+    open_page(page)
+    assert page_bg(page) != bg
+    theme_button(page, choice).click()
+    expect_theme(page, choice)
+    assert page_bg(page) == bg
+    open_page(page)
+    expect_theme(page, choice)
+    assert page_bg(page) == bg
+
+
+def test_system_follows_the_colour_scheme(page: Page, dashboard):
+    page.emulate_media(color_scheme="light")
+    open_page(page)
+    theme_button(page, "Dark").click()
+    theme_button(page, "System").click()
+    expect_theme(page, "System")
+    assert page_bg(page) == LIGHT_BG
+    page.emulate_media(color_scheme="dark")
+    assert page_bg(page) == DARK_BG
+    open_page(page)                                                    # System is kept too
+    expect_theme(page, "System")
+    assert page_bg(page) == DARK_BG
+
+
+def test_theme_picker_works_from_the_keyboard(page: Page, dashboard):
+    page.emulate_media(color_scheme="light")
+    open_page(page)
+    dark = theme_button(page, "Dark")
+    dark.focus()
+    page.keyboard.press("Enter")
+    expect_theme(page, "Dark")
+    assert page_bg(page) == DARK_BG
+    theme_button(page, "Light").focus()
+    page.keyboard.press("Space")
+    expect_theme(page, "Light")
+    assert page_bg(page) == LIGHT_BG
+    page.keyboard.press("Tab")                                         # System, Light, Dark
+    expect(dark).to_be_focused()
+    assert _style(dark, "outlineStyle") == "solid"
+
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_picked_theme_button_stands_out_at_3_to_1(page: Page, dashboard, scheme):
+    page.emulate_media(color_scheme=scheme)
+    open_page(page)
+    picked = theme_button(page, "System")
+    assert _contrast(_style(picked, "borderTopColor"), page_bg(page)) >= 3
+    for name in ("System", "Light"):
+        icon = theme_button(page, name).locator("svg")
+        assert _contrast(_style(icon, "stroke"), page_bg(page)) >= 4.5
+
+
+def test_saved_theme_is_applied_before_app_js_runs(page: Page, dashboard):
+    """No flash of the other theme: theme.js sets it from <head>, so the page never waits on app.js for it."""
+    page.emulate_media(color_scheme="light")
+    open_page(page)
+    theme_button(page, "Dark").click()
+    page.route("**/app.js", lambda route: route.abort())
+    page.goto("/")
+    expect(page.locator("#updated")).to_have_text("Loading…")          # app.js never ran
+    assert page.locator("html").get_attribute("data-theme") == "dark"
+    assert page_bg(page) == DARK_BG
+
+
+@pytest.mark.parametrize("saved", ["purple", "", "system"])
+def test_an_unknown_saved_theme_falls_back_to_system(page: Page, dashboard, console_errors, saved):
+    page.emulate_media(color_scheme="dark")
+    page.add_init_script(f"localStorage.setItem('theme', {saved!r})")
+    open_page(page)
+    expect_theme(page, "System")
+    assert page.locator("html").get_attribute("data-theme") is None
+    assert page_bg(page) == DARK_BG
+    assert console_errors == []
+
+
+def test_blocked_storage_falls_back_to_system_and_the_picker_still_works(page: Page, dashboard, console_errors):
+    page.add_init_script("""Object.defineProperty(window, 'localStorage', {
+      get() { throw new DOMException('blocked', 'SecurityError'); } })""")
+    page.emulate_media(color_scheme="light")
+    open_page(page)
+    expect_theme(page, "System")
+    theme_button(page, "Dark").click()
+    expect_theme(page, "Dark")
+    assert page_bg(page) == DARK_BG
+    open_page(page)                                                    # not kept
+    expect_theme(page, "System")
+    assert page_bg(page) == LIGHT_BG
+    assert console_errors == []
