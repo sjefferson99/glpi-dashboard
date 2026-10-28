@@ -56,7 +56,7 @@ PLAIN_ITEMTYPE = re.compile(r"[A-Za-z_]+")
 SEARCH_MIN, SEARCH_MAX, SEARCH_LIMIT = 2, 100, 100
 SNIPPET_BEFORE, SNIPPET_AFTER = 60, 140
 SPACE = re.compile(r"\s+")
-ID_WORD = re.compile(r"#(\d+)")     # a search word naming an id, e.g. "#12"
+ID_WORD = re.compile(r"#([0-9]+)")  # a search word naming an id, e.g. "#12"; ASCII digits only, as the page's
 
 
 def _date(s):
@@ -81,7 +81,7 @@ def _blank(html_text):
 
 def _pattern(term):
     """Returns the regex a search word matches: the word itself, but an ``#id`` only as a whole number."""
-    return re.escape(term) + (r"(?!\d)" if ID_WORD.fullmatch(term) else "")
+    return re.escape(term) + (r"(?![0-9])" if ID_WORD.fullmatch(term) else "")
 
 
 def _has(term, text):

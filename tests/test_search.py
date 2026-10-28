@@ -138,6 +138,13 @@ def test_only_a_hash_and_digits_is_an_id(idx):
         assert model.search(idx, q)["ids"] == []
 
 
+def test_an_id_takes_ascii_digits_only_as_the_page_does(idx):
+    # Python's \d and int() take any Unicode digit; the page's /^#\d+$/ doesn't, so "#١" (Arabic-Indic one) found
+    # records the page never showed.
+    assert model.search(idx, "#١")["ids"] == []
+    assert model._snippet("see #1٢ here", ["#1"]) == "see #1٢ here"     # #1 ends where 0-9 does
+
+
 def test_title_matches_rank_above_other_matches(idx):
     # "db1" is in T2's title, and in C3's title; T2 also links to db1, as do C3 and the CI itself.
     r = refs(model.search(idx, "db1"))
